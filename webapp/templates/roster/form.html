@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
+
+<form method="post" class="card-form">
+  <fieldset>
+    <legend>Card</legend>
+    <div class="fields">
+      <label class="wide">Name
+        <input name="name" value="{{ card.name or '' }}" required autofocus>
+      </label>
+      <label>Firepower
+        <input name="firepower" type="number" min="0" value="{{ card.firepower if card.firepower is not none }}" required>
+      </label>
+      <label>Survivability
+        <input name="survivability" type="number" min="0" value="{{ card.survivability if card.survivability is not none }}" required>
+      </label>
+      <label>Maneuverability
+        <input name="maneuverability" type="number" min="0" value="{{ card.maneuverability if card.maneuverability is not none }}" required>
+      </label>
+    </div>
+    <p class="hint">Base values at full HP, before buffs.</p>
+  </fieldset>
+
+  {% for n in (1, 2) %}
+  <fieldset class="ability" data-n="{{ n }}">
+    <legend>Ability {{ n }}</legend>
+    <div class="fields">
+      <label>Type
+        <select name="ability{{ n }}_type" data-selected="{{ card['ability%d_type' % n] or '' }}">
+          <option value="">None</option>
+          <option value="buff">Buff</option>
+          <option value="debuff">Debuff</option>
+        </select>
+      </label>
+      <label>Target
+        <select name="ability{{ n }}_target" data-selected="{{ card['ability%d_target' % n] or '' }}"></select>
+      </label>
+      <label>Direction
+        <select name="ability{{ n }}_direction" data-selected="{{ card['ability%d_direction' % n] or '' }}"></select>
+      </label>
+      <label>Strength %
+        <input name="ability{{ n }}_pct" type="number" min="1"
+               value="{{ card['ability%d_pct' % n] if card['ability%d_pct' % n] is not none }}">
+      </label>
+    </div>
+  </fieldset>
+  {% endfor %}
+  <p class="hint">Buffs raise a parameter of the card to the left or right. Debuffs lower the enemy
+    diagonally left, straight ahead or diagonally right, if it has that vulnerability.
+    Strength defaults to {{ default_pct.buff }}% for buffs and {{ default_pct.debuff }}% for debuffs.</p>
+
+  <div class="form-actions">
+    <button class="button primary" type="submit">Save</button>
+    <a class="button" href="{{ url_for('roster.index') }}">Cancel</a>
+  </div>
+</form>
+
+<script>
+  const CHOICES = {{ choices|tojson }};
+  const DEFAULT_PCT = {{ default_pct|tojson }};
+
+  function fill(select, options, selected) {
+    select.innerHTML = "";
+    for (const [value, label] of options) {
+      const o = new Option(label, value, false, value === selected);
+      select.add(o);
+    }
+  }
+
+  document.querySelectorAll("fieldset.ability").forEach(fs => {
+    const n = fs.dataset.n;
+    const type = fs.querySelector(`[name=ability${n}_type]`);
+    const target = fs.querySelector(`[name=ability${n}_target]`);
+    const direction = fs.querySelector(`[name=ability${n}_direction]`);
+    const pct = fs.querySelector(`[name=ability${n}_pct]`);
+    type.value = type.dataset.selected;
+
+    function update(keepSelection) {
+      const c = CHOICES[type.value];
+      const on = Boolean(c);
+      fill(target, on ? [["", "Choose…"], ...c.targets] : [],
+           keepSelection ? target.dataset.selected : "");
+      fill(direction, on ? [["", "Choose…"], ...c.directions.map(d => [d, d])] : [],
+           keepSelection ? direction.dataset.selected : "");
+      for (const el of [target, direction, pct]) el.disabled = !on;
+      target.required = direction.required = on;
+      pct.placeholder = on ? DEFAULT_PCT[type.value] : "";
+      if (!on) pct.value = "";
+    }
+    type.addEventListener("change", () => update(false));
+    update(true);
+  });
+</script>
+{% endblock %}

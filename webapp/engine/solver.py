@@ -23,8 +23,10 @@ Search (solve_stage):
 
 Assumptions not yet confirmed in-game (marked ASSUMPTION below):
   - Focused: the card neither gives nor receives buffs, and its debuffs are off.
-  - Unstoppable: battle conditions on parameters (and on buffs/debuffs, once modelled) are
-    ignored for that card. It does not lift card bans (Barred), modifier bans or HP loss.
+  - Unstoppable: battle conditions on the card's parameters and on the power of its own
+    buffs/debuffs are ignored. It does not lift card bans (Barred), modifier bans or HP loss.
+  - "Buff power" / "Debuff power" conditions scale every buff/debuff a card gives, adding to
+    Teamwork / Specialization (+100%): 20% debuff at -50% -> 10%, with Specialization -> 30%.
   - An "Enemy power" condition adds to the same % pool as debuffs (e.g. +10% and one
     -20% debuff -> x0.90), and Unstoppable does not cancel it.
   - Fast Repair: +2 HP (cap 3) before the battle, then the battle costs 1 HP as usual.
@@ -41,8 +43,6 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from itertools import combinations, permutations
 from math import prod
-
-HERE = os.path.dirname(os.path.abspath(__file__))
 
 PARAMS = ("F", "S", "M")
 HP_PCT = {3: 100, 2: 90, 1: 80, 0: 0}
@@ -132,40 +132,47 @@ class Enemy:
 
 
 # ---------------------------------------------------------------- one key point
-def _effects(slots, enemies, mset):
-    """Buff % each of your cards receives and debuff % each enemy takes."""
+def _effects(slots, enemies, mset, cond):
+    """Buff each of your cards receives and debuff each enemy takes, in hundredths of a
+    percent (a 20% debuff at half power is 1000), so scaled abilities stay exact."""
     bonus = [{p: 0 for p in PARAMS} for _ in range(4)]
-    debuff_pct = [0] * 4
+    debuffed = [0] * 4
     for i, c in enumerate(slots):
         if c is None or "Focused" in mset[i]:          # ASSUMPTION: no outgoing effects
             continue
-        b_mult = 2 if "Teamwork" in mset[i] else 1
-        d_mult = 2 if "Specialization" in mset[i] else 1
+        # Ability power in %: Teamwork / Specialization add 100 (x2), and the "Buff power" /
+        # "Debuff power" conditions add theirs, unless this card is Unstoppable.
+        # ASSUMPTION: these add up (Specialization under -50% debuff power gives x1.5).
+        own = {} if "Unstoppable" in mset[i] else cond
+        b_power = max(0, 100 + 100 * ("Teamwork" in mset[i]) + own.get("B", 0))
+        d_power = max(0, 100 + 100 * ("Specialization" in mset[i]) + own.get("D", 0))
         rabid = "Rabid" in mset[i]
         for a in c.abilities:
             if a.kind == "buff":
                 j = i + BUFF_OFFSET[a.dir]
                 if 0 <= j < 4 and slots[j] is not None and "Focused" not in mset[j]:
-                    bonus[j][a.target] += a.pct * b_mult
+                    bonus[j][a.target] += a.pct * b_power
             else:
                 j = i + DEBUFF_OFFSET[a.dir]
                 if (0 <= j < 4 and enemies[j] is not None
                         and (rabid or a.target in enemies[j].vulns)):
-                    debuff_pct[j] += a.pct * d_mult
-    return bonus, debuff_pct
+                    debuffed[j] += a.pct * d_power
+    return bonus, debuffed
 
 
 def _card_result(c, e_pow, mods, bonus, cond):
-    """Parameters, power, win chance and HP cost of one placed card."""
+    """Parameters, power, win chance and HP cost of one placed card.
+    bonus: buffs received, in hundredths of a percent."""
     hp = min(3, c.hp + 2) if "Fast Repair" in mods else c.hp
     params = {}
     for p in PARAMS:
         # HP loss is a -10% debuff per lost HP, in the same additive pool.
         # Unstoppable ignores battle conditions only, not HP loss.
-        pct = (bonus[p] - (100 - HP_PCT[hp])
+        pct = (-(100 - HP_PCT[hp])
                + (0 if "Unstoppable" in mods else cond.get(p, 0))
                + sum(PARAM_MODS.get(name, {}).get(p, 0) for name in mods))
-        params[p] = max(0, round_half_up(getattr(c, p) * (100 + pct), 100))
+        params[p] = max(0, round_half_up(getattr(c, p) * (10000 + 100 * pct + bonus[p]),
+                                         10000))
     power = sum(params.values())
     return {"card": c, "params": params, "P": power, "E": e_pow,
             "p": 0.0 if e_pow is None else min(21, max(0, power + 11 - e_pow)) / 21,
@@ -177,15 +184,16 @@ def _card_result(c, e_pow, mods, bonus, cond):
 
 def evaluate(slots, enemies, cond=None, mods=None):
     """Score one arrangement. slots/enemies: length-4 lists, entries may be None.
-    cond: battle-condition % per parameter for all your cards, e.g. {"F": -24}.
+    cond: battle conditions in %: "F"/"S"/"M" on your cards' parameters, "E" on enemy
+          power, "B"/"D" on the power of your cards' buffs/debuffs, e.g. {"F": -24, "D": -50}.
     mods: length-4 list of tuples of modifier names per slot."""
     cond = cond or {}
     mset = [set(m) for m in (mods or [()] * 4)]
-    bonus, debuff_pct = _effects(slots, enemies, mset)
+    bonus, debuffed = _effects(slots, enemies, mset, cond)
     out = []
     for i, (c, enemy) in enumerate(zip(slots, enemies)):
         e_pow = None if enemy is None else round_half_up(
-            enemy.power * max(0, 100 - debuff_pct[i] + cond.get("E", 0)), 100)
+            enemy.power * max(0, 10000 - debuffed[i] + 100 * cond.get("E", 0)), 10000)
         if c is None:
             out.append({"card": None, "params": None, "P": None, "E": e_pow, "p": 0.0,
                         "weight": 1, "reward_mult": 1.0, "cost": 0.0})
@@ -463,14 +471,19 @@ NOMOD_KEYS = {"no modifiers": {"grey", "green"}, "no grey modifiers": {"grey"},
               "no green modifiers": {"green"}}
 
 ENV_KEYS = {"firepower": "F", "survivability": "S", "maneuverability": "M",
-            "enemy power": "E"}
+            "enemy power": "E", "buff power": "B", "debuff power": "D"}
+
+
+def clean_rows(reader):
+    """Rows of a csv.DictReader with keys and values stripped (extra unnamed cells dropped)."""
+    for row in reader:
+        yield {k.strip(): (v or "").strip() for k, v in row.items() if k is not None}
 
 
 def _rows(path):
     """CSV rows as dicts with keys and values stripped."""
     with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            yield {k.strip(): (v or "").strip() for k, v in row.items()}
+        yield from clean_rows(csv.DictReader(f))
 
 
 def _ability(row, n):
@@ -478,26 +491,50 @@ def _ability(row, n):
     kind = row.get(f"ability{n}_type", "").lower()
     if not kind:
         return None
-    target = row[f"ability{n}_target"]
-    direction = row[f"ability{n}_direction"].lower()
-    pct = int(row.get(f"ability{n}_pct") or (30 if kind == "buff" else 20))
+    where = f"{row['name']} ability {n}"
+    target = row.get(f"ability{n}_target", "")
+    direction = row.get(f"ability{n}_direction", "").lower()
     if kind == "buff":
+        if target.lower() not in PARAM_NAMES:
+            raise ValueError(f"{where}: unknown buff target {target!r}")
         target = PARAM_NAMES[target.lower()]
-        assert direction in BUFF_OFFSET, (row["name"], direction)
+        directions = BUFF_OFFSET
+    elif kind == "debuff":
+        if target not in VULNS:
+            raise ValueError(f"{where}: unknown vulnerability {target!r}")
+        directions = DEBUFF_OFFSET
     else:
-        assert target in VULNS, (row["name"], target)
-        assert direction in DEBUFF_OFFSET, (row["name"], direction)
+        raise ValueError(f"{where}: type must be buff or debuff, got {kind!r}")
+    if direction not in directions:
+        raise ValueError(f"{where}: {kind} direction must be one of "
+                         f"{', '.join(directions)}, got {direction!r}")
+    pct = int(row.get(f"ability{n}_pct") or (30 if kind == "buff" else 20))
     return Ability(kind, target, direction, pct)
 
 
+def parse_roster(rows):
+    """Cards from cleaned roster rows. Columns: name, firepower, survivability,
+    maneuverability, [hp, used,] then ability1_* / ability2_* (type, target, direction, pct).
+    Blank ability = none. Raises ValueError naming the bad row."""
+    cards = []
+    for line, row in enumerate(rows, start=2):
+        try:
+            if not row.get("name"):
+                raise ValueError("name is missing")
+            cards.append(Card(row["name"], int(row["firepower"]), int(row["survivability"]),
+                              int(row["maneuverability"]),
+                              tuple(a for a in (_ability(row, 1), _ability(row, 2)) if a),
+                              hp=int(row.get("hp") or 3), used=_yes(row.get("used", ""))))
+        except KeyError as e:
+            raise ValueError(f"line {line}: missing column {e.args[0]!r}") from e
+        except ValueError as e:
+            raise ValueError(f"line {line}: {e}") from e
+    return cards
+
+
 def load_roster(path):
-    """Read cards from CSV. Columns: name, firepower, survivability, maneuverability, hp,
-    then ability1_* / ability2_* (type, target, direction, pct). Blank ability = none."""
-    return [Card(row["name"], int(row["firepower"]), int(row["survivability"]),
-                 int(row["maneuverability"]),
-                 tuple(a for a in (_ability(row, 1), _ability(row, 2)) if a),
-                 hp=int(row.get("hp") or 3), used=_yes(row.get("used", "")))
-            for row in _rows(path)]
+    """Read cards from a roster CSV file (see parse_roster)."""
+    return parse_roster(_rows(path))
 
 
 def load_modifiers(path):
@@ -655,16 +692,16 @@ def validate():
     print("Validation: all in-game observations reproduced.\n")
 
 
-def _load_if_exists(name, loader, default):
-    path = os.path.join(HERE, name)
+def _load_if_exists(path, loader, default):
     return loader(path) if os.path.exists(path) else default
 
 
 def main(argv):
-    """Solve the stage in board.csv / environment.csv (or the files named in argv)."""
+    """Solve the stage in board.csv / environment.csv (or the files named in argv).
+    roster.csv and modifiers.csv are read from the current directory."""
     validate()
-    board_path = argv[1] if len(argv) > 1 else os.path.join(HERE, "board.csv")
-    env_path = argv[2] if len(argv) > 2 else os.path.join(HERE, "environment.csv")
+    board_path = argv[1] if len(argv) > 1 else "board.csv"
+    env_path = argv[2] if len(argv) > 2 else "environment.csv"
     roster = _load_if_exists("roster.csv", load_roster, list(EXAMPLE_ROSTER))
     inventory = _load_if_exists("modifiers.csv", load_modifiers, {})
     keypoints, min_wins = load_stage(board_path, env_path, roster)

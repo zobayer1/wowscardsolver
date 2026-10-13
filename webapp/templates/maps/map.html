@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+{% from "maps/_macros.html" import env_fields, env_summary, keypoint_editor, vulns, pct %}
+{% block title %}{{ map.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ map.name }} <span class="count">started {{ map.created_at }}</span></h1>
+</div>
+
+<div class="map-layout">
+  <div class="main-col">
+
+    {# ------------------------------------------------ current stage #}
+    {% if current %}
+    {% set st = current %}
+    {% set open_kps = st.keypoints|rejectattr('played')|list %}
+    <section class="panel" id="current-stage">
+      <div class="panel-head">
+        <h2 id="stage-{{ st.number }}">Stage {{ st.number }}</h2>
+        <div class="chips">
+          <span class="chip {{ 'ok' if st.wins >= st.wins_needed and st.wins_needed }}">
+            Wins {{ st.wins }} / {{ st.wins_needed }}</span>
+          <span class="chip">{{ st.keypoints|length }} key point{{ 's' if st.keypoints|length != 1 }}
+            · {{ 'all entered' if st.complete else 'more to come' }}</span>
+        </div>
+        <div class="panel-actions">
+          {% if not st.has_battles %}
+          <form method="post" action="{{ url_for('maps.delete_stage', stage_id=st.id) }}"
+                onsubmit="return confirm('Delete stage {{ st.number }} and its key points?');">
+            <button class="button small danger" type="submit">Delete stage</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('maps.finish_stage', stage_id=st.id) }}"
+                data-confirm="Finish stage {{ st.number }}?{% if st.wins < st.wins_needed %} The goal of {{ st.wins_needed }} wins is not met yet.{% endif %}"
+                onsubmit="return confirm(this.dataset.confirm);">
+            <button class="button small" type="submit">Finish stage</button>
+          </form>
+        </div>
+      </div>
+
+      {# stage environment #}
+      <form method="post" action="{{ url_for('maps.stage_env', stage_id=st.id) }}" class="subpanel">
+        <h3>Stage environment</h3>
+        <div class="fields">
+          <label class="narrow">Wins needed (stage goal)
+            <input name="wins_needed" type="number" min="0" value="{{ st.wins_needed }}">
+          </label>
+          <label class="check end">
+            <input type="checkbox" name="all_keypoints" {{ 'checked' if st.all_keypoints }}>
+            All key points of this stage are entered
+          </label>
+        </div>
+        {{ env_fields(st, cards, env_labels) }}
+        <div class="form-actions">
+          <button class="button" type="submit">Save stage settings</button>
+        </div>
+      </form>
+
+      {# key points #}
+      {% for kp in st.keypoints %}
+      {% set barred = st.barred + kp.barred %}
+      {% set editing = draft and draft.kp_id == kp.id %}
+      <div class="kp {{ 'played' if kp.played }}" id="kp-{{ kp.id }}">
+        <div class="kp-head">
+          <h3>Key point {{ kp.number }}</h3>
+          <span class="muted">{{ env_summary(kp, env_labels) }}{% if kp.min_wins %} · needs {{ kp.min_wins }} wins here{% endif %}</span>
+          {% if kp.played %}<span class="chip ok">played · {{ kp.wins }} win{{ 's' if kp.wins != 1 }}</span>{% endif %}
+          <div class="panel-actions">
+            {% if kp.played %}
+            <form method="post" action="{{ url_for('maps.undo', keypoint_id=kp.id) }}"
+                  onsubmit="return confirm('Undo the battle at key point {{ kp.number }}? HP, used flags and modifiers are restored.');">
+              <button class="button small" type="submit">Undo battle</button>
+            </form>
+            {% else %}
+            <button class="button small" type="button" onclick="toggleEditor('kp-editor-{{ kp.id }}')">Edit</button>
+            <form method="post" action="{{ url_for('maps.delete_keypoint', keypoint_id=kp.id) }}"
+                  onsubmit="return confirm('Delete key point {{ kp.number }}?');">
+              <button class="button small danger" type="submit">Delete</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+
+        <form method="post" action="{{ url_for('maps.record', keypoint_id=kp.id) }}"
+              id="record-kp-{{ kp.id }}" {{ 'hidden' if editing }}>
+          <div class="slots">
+            {% for e in kp.enemies %}
+            {% set slot = loop.index %}
+            {% set b = kp.battles|selectattr('slot', 'equalto', slot)|first %}
+            <div class="slot-card {{ 'empty' if not e }} {{ ('won' if b.won else 'lost') if b }}">
+              <div class="slot-title">Slot {{ slot }}
+                {% if e and e.must_win %}<span class="tag must">must win</span>{% endif %}</div>
+              {% if e %}
+              <div class="enemy-power">{{ e.power }}</div>
+              <div class="enemy-vulns">
+                {% for v in [e.vuln1, e.vuln2] if v %}<span class="tag vuln">{{ v }}</span>
+                {% else %}<span class="muted small">no vulnerabilities</span>{% endfor %}
+              </div>
+              <div class="muted small">Reward {{ '%g' % e.reward }}</div>
+              <div class="slot-you">
+                {% if kp.played %}
+                  {% if b %}
+                  <div class="name">{{ b.card_name }}</div>
+                  <div>{% for m in [b.grey_mod, b.green_mod] if m %}<span class="tag mod">{{ m }}</span>{% endfor %}</div>
+                  <button class="result" type="submit"
+                          formaction="{{ url_for('maps.toggle_won', keypoint_id=kp.id, slot=slot) }}"
+                          title="Click to mark as {{ 'lost' if b.won else 'won' }}">{{ '✔ Won' if b.won else '✘ Lost' }}</button>
+                  {% else %}<span class="muted small">No card placed</span>{% endif %}
+                {% else %}
+                <select name="card{{ slot }}" aria-label="Your card in slot {{ slot }}">
+                  <option value="">Your card…</option>
+                  {% for c in cards if c.hp > 0 and not c.used and c.name not in barred %}
+                  <option value="{{ c.id }}">{{ c.name }} ({{ c.firepower + c.survivability + c.maneuverability }}, HP {{ c.hp }})</option>
+                  {% endfor %}
+                </select>
+                <div class="mods-row">
+                  <select name="grey{{ slot }}" aria-label="Grey modifier" {{ 'disabled' if st.no_grey or kp.no_grey }}>
+                    <option value="">No grey</option>
+                    {% for n in grey_mods if modifiers[n] > 0 %}<option>{{ n }}</option>{% endfor %}
+                  </select>
+                  <select name="green{{ slot }}" aria-label="Green modifier" {{ 'disabled' if st.no_green or kp.no_green }}>
+                    <option value="">No green</option>
+                    {% for n in green_mods if modifiers[n] > 0 %}<option>{{ n }}</option>{% endfor %}
+                  </select>
+                </div>
+                <label class="check"><input type="checkbox" name="won{{ slot }}"> Won</label>
+                {% endif %}
+              </div>
+              {% else %}
+              <div class="empty-note">Empty slot</div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          {% if not kp.played %}
+          <div class="form-actions">
+            <button class="button primary" type="submit">Record battle</button>
+            <span class="hint">Pick the cards you placed and tick the enemies you beat. Each card loses 1 HP and is marked used.</span>
+          </div>
+          {% endif %}
+        </form>
+
+        {% if not kp.played %}
+        {{ keypoint_editor(url_for('maps.edit_keypoint', keypoint_id=kp.id),
+                           draft.kp if editing else kp, cards, env_labels, vuln_names,
+                           'kp-editor-%d' % kp.id, 'record-kp-%d' % kp.id, editing) }}
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      {% if st.keypoints|length < max_keypoints %}
+      {% set adding = draft and draft.kp_id is none %}
+      <div class="kp new-kp">
+        <div class="add-kp" id="add-kp" {{ 'hidden' if adding }}>
+          <button class="button" type="button" onclick="toggleEditor('kp-editor-new')">Add key point {{ st.keypoints|length + 1 }}</button>
+          {% if not st.keypoints %}<span class="hint">A stage has 1–{{ max_keypoints }} key points; add them as they appear.</span>{% endif %}
+        </div>
+        {% if adding %}<h3>Key point {{ st.keypoints|length + 1 }}</h3>{% endif %}
+        {{ keypoint_editor(url_for('maps.new_keypoint', stage_id=st.id),
+                           draft.kp if adding else {}, cards, env_labels, vuln_names,
+                           'kp-editor-new', 'add-kp', adding) }}
+      </div>
+      {% endif %}
+
+      {# solver #}
+      {% if open_kps %}
+      <div class="subpanel solve">
+        <div class="solve-head">
+          <h3>Solver</h3>
+          <form method="post" action="{{ url_for('maps.solve', stage_id=st.id) }}"
+                onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Solving…';">
+            <button class="button primary" type="submit">
+              Solve {{ open_kps|length }} open key point{{ 's' if open_kps|length != 1 }}</button>
+          </form>
+          <span class="hint">Goal for this run: {{ goal }} more win{{ 's' if goal != 1 }}{% if not st.complete %}
+            (capped at what the entered key points offer, since more key points are coming){% endif %}.</span>
+        </div>
+
+        {% set sol = st.solution %}
+        {% if sol %}
+        <p class="muted small">
+          Solved {{ sol.solved_at }} · compared {{ '{:,}'.format(sol.compared) }} card splits
+          · goal {{ sol.goal }} wins
+          {% if st.solution_stale %}<span class="warn">Inputs changed since this run. Solve again for current advice.</span>{% endif %}
+        </p>
+        <div class="plans">
+          {% for plan in sol.plans %}
+          {% set plan_index = loop.index0 %}
+          {% set open_ids = open_kps|map(attribute='id')|list %}
+          {% set applicable = plan.keypoints|rejectattr('keypoint_id', 'in', open_ids)|list|length == 0 %}
+          <div class="plan">
+            <div class="plan-head">
+              <h4>Plan {{ loop.index }}</h4>
+              {% if applicable %}
+              <form method="post" action="{{ url_for('maps.apply_plan', stage_id=st.id, plan_index=plan_index) }}"
+                    {% if st.solution_stale %}onsubmit="return confirm('Inputs changed since this plan was made. Apply it anyway?');"{% endif %}>
+                <button class="button primary small" type="submit"
+                        title="Record this plan: HP, used cards and modifiers update automatically">Apply plan {{ loop.index }}</button>
+              </form>
+              {% endif %}
+            </div>
+            <div class="plan-stats">
+              <span><b>{{ pct(plan.p_goal) }}</b> goal</span>
+              <span><b>{{ '%.2f' % plan.exp_reward }}</b> exp. reward</span>
+              <span><b>{{ '%.2f' % plan.exp_wins }}</b> exp. wins</span>
+              <span><b>{{ '%g' % plan.spend }}</b> modifier spend</span>
+              <span><b>{{ '%.1f' % plan.cost }}</b> HP cost</span>
+            </div>
+            {% if plan.order %}<p class="small">Play order: key point {{ plan.order|join(' → ') }} (riskiest first).</p>{% endif %}
+            {% for pk in plan.keypoints %}
+            {% set live = st.keypoints|selectattr('id', 'equalto', pk.keypoint_id)|rejectattr('played')|list %}
+            <div class="plan-kp">
+              <div class="plan-kp-head">
+                <b>Key point {{ pk.number }}</b>
+                <span class="muted">{{ '%.2f' % pk.exp_wins }} wins · reward {{ '%.2f' % pk.exp_reward }}</span>
+                {% if live %}
+                <button class="button small" type="button"
+                        onclick="fillPlan({{ plan_index }}, {{ pk.keypoint_id }})">Use for key point {{ pk.number }}</button>
+                {% endif %}
+              </div>
+              <table class="data compact">
+                <tbody>
+                  {% for s in pk.slots %}
+                  <tr>
+                    <td class="num muted">{{ loop.index }}</td>
+                    {% if s.card %}
+                    <td class="name">{{ s.card }}</td>
+                    <td class="num muted">F{{ s.F }} S{{ s.S }} M{{ s.M }}</td>
+                    <td class="num">{{ s.P - 10 }}–{{ s.P + 10 }}</td>
+                    <td class="num muted">vs {{ s.E }}</td>
+                    <td class="num {{ 'ok' if s.p >= 1 else 'risk' if s.p < 0.5 }}">{{ pct(s.p) }}</td>
+                    <td>{% for m in s.mods %}<span class="tag mod">{{ m }}</span>{% endfor %}</td>
+                    {% else %}
+                    <td class="muted" colspan="6">{{ 'empty, vs ' ~ s.E if s.E is not none else 'no enemy' }}</td>
+                    {% endif %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+        <script>
+          const PLANS = {{ sol.plans|tojson }};
+          const GREY = {{ grey_mods|tojson }};
+          const GREEN = {{ green_mods|tojson }};
+          // Copy a plan's placement for one key point into that key point's record form.
+          function fillPlan(planIndex, keypointId) {
+            const kp = PLANS[planIndex].keypoints.find(k => k.keypoint_id === keypointId);
+            const form = document.getElementById(`record-kp-${keypointId}`);
+            kp.slots.forEach((s, i) => {
+              const slot = i + 1;
+              const set = (name, value) => { const el = form.elements[name]; if (el) el.value = value; };
+              set(`card${slot}`, s.card ? String(s.map_card_id) : "");
+              const mods = s.mods || [];
+              set(`grey${slot}`, mods.find(m => GREY.includes(m)) || "");
+              set(`green${slot}`, mods.find(m => GREEN.includes(m)) || "");
+              const won = form.elements[`won${slot}`];
+              if (won) won.checked = Boolean(s.card) && s.p >= 1;
+            });
+            form.scrollIntoView({behavior: "smooth", block: "center"});
+            form.closest(".kp").classList.add("flash-fill");
+            setTimeout(() => form.closest(".kp").classList.remove("flash-fill"), 1200);
+          }
+        </script>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+
+    {% else %}
+    <section class="panel start-stage" id="current-stage">
+      <form method="post" action="{{ url_for('maps.new_stage', map_id=map.id) }}">
+        <button class="button primary" type="submit">Start a New Stage</button>
+      </form>
+      <span class="hint">{{ 'All cards are available again; HP carries over from the previous stage.' if stages else 'All cards start at full HP.' }}</span>
+    </section>
+    {% endif %}
+
+    {# ------------------------------------------------ finished stages #}
+    {% for st in stages|reverse if st.finished %}
+    <details class="panel past" id="stage-{{ st.number }}">
+      <summary>
+        <h2>Stage {{ st.number }}</h2>
+        <span class="chip {{ 'ok' if st.wins >= st.wins_needed }}">Wins {{ st.wins }} / {{ st.wins_needed }}</span>
+        <span class="chip">{{ st.keypoints|length }} key point{{ 's' if st.keypoints|length != 1 }}</span>
+        <span class="muted">{{ env_summary(st, env_labels) }}</span>
+        {% if loop.first and not current %}
+        <form method="post" action="{{ url_for('maps.reopen_stage', stage_id=st.id) }}" class="push-right">
+          <button class="button small" type="submit">Reopen</button>
+        </form>
+        {% endif %}
+      </summary>
+      {% for kp in st.keypoints %}
+      <div class="kp played">
+        <div class="kp-head">
+          <h3>Key point {{ kp.number }}</h3>
+          <span class="muted">{{ env_summary(kp, env_labels) }}</span>
+          <span class="chip">{{ kp.wins }} win{{ 's' if kp.wins != 1 }}</span>
+        </div>
+        <table class="data compact">
+          <tbody>
+            {% for e in kp.enemies %}
+            {% set b = kp.battles|selectattr('slot', 'equalto', loop.index)|first %}
+            <tr>
+              <td class="num muted">{{ loop.index }}</td>
+              <td class="num">{{ e.power if e else 'empty' }}</td>
+              <td>{{ vulns(e) if e else '' }}</td>
+              <td class="name">{{ b.card_name if b else '—' }}</td>
+              <td>{{ [b.grey_mod, b.green_mod]|select|join(', ') if b }}</td>
+              <td class="center">{% if b %}{{ '✔' if b.won else '✘' }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted">No key points.</p>
+      {% endfor %}
+    </details>
+    {% endfor %}
+  </div>
+
+  {# ------------------------------------------------ sidebar #}
+  <aside class="side-col">
+    <section class="panel" id="cards">
+      <div class="panel-head"><h2>Cards</h2>
+        <span class="muted">{{ cards|selectattr('hp')|rejectattr('used')|list|length }} of {{ cards|length }} available</span>
+        <form method="post" action="{{ url_for('maps.sync_roster', map_id=map.id) }}" class="push-right">
+          <button class="button small" type="submit"
+                  title="Add cards that were added to the roster after this map started, at 3 HP">Sync roster</button>
+        </form></div>
+      <form method="post" action="{{ url_for('maps.set_cards', map_id=map.id) }}">
+        <table class="data compact">
+          <thead><tr><th>Name</th><th class="num">Base</th><th>HP</th><th class="center">Used</th></tr></thead>
+          <tbody>
+            {% for c in cards %}
+            <tr class="{{ 'out' if c.hp == 0 }} {{ 'is-used' if c.used }}" title="{{ [describe(c, 1), describe(c, 2)]|select|join(' · ') }}">
+              <td class="name">{{ c.name }}</td>
+              <td class="num">{{ c.firepower + c.survivability + c.maneuverability }}</td>
+              <td>
+                <select name="hp_{{ c.id }}" class="hp hp{{ c.hp }}" aria-label="HP of {{ c.name }}">
+                  {% for h in (3, 2, 1, 0) %}<option {{ 'selected' if c.hp == h }}>{{ h }}</option>{% endfor %}
+                </select>
+              </td>
+              <td class="center"><input type="checkbox" name="used_{{ c.id }}" aria-label="{{ c.name }} used"
+                                        {{ 'checked' if c.used }}></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="form-actions">
+          <button class="button small" type="submit">Save cards</button>
+          <span class="hint">Recorded battles update HP and used for you.</span>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel" id="modifiers">
+      <div class="panel-head"><h2>Modifiers</h2>
+        <span class="muted">shared by all maps</span>
+        <button class="button small push-right" type="button" id="reload-stock"
+                title="Load the current counts, e.g. after another map used or changed some">Reload counts</button>
+      </div>
+      <form method="post" action="{{ url_for('maps.set_modifiers', map_id=map.id) }}" id="stock-form">
+        {% for group, names in (('Grey', grey_mods), ('Green', green_mods)) %}
+        <h3 class="group">{{ group }}</h3>
+        <div class="mod-grid">
+          {% for n in names %}
+          <label>{{ n }}<input name="mod_{{ n }}" type="number" min="0" value="{{ stock[n].count }}"></label>
+          <input type="hidden" name="ver_{{ n }}" value="{{ stock[n].version }}">
+          {% endfor %}
+        </div>
+        {% endfor %}
+        <div class="form-actions">
+          <button class="button small" type="submit">Save stock</button>
+          <span class="hint" id="stock-note">Applied plans and recorded battles take used modifiers off.</span>
+        </div>
+      </form>
+      <script>
+        // Refresh just the modifier counts (and their versions) without reloading the page.
+        document.getElementById("reload-stock").addEventListener("click", async () => {
+          const note = document.getElementById("stock-note");
+          try {
+            const r = await fetch("{{ url_for('maps.modifiers_json') }}", {cache: "no-store"});
+            const stock = await r.json();
+            const form = document.getElementById("stock-form");
+            const changed = [];
+            for (const [name, s] of Object.entries(stock)) {
+              const input = form.elements[`mod_${name}`];
+              if (!input) continue;
+              if (Number(input.value) !== s.count) changed.push(`${name} ${s.count}`);
+              input.value = s.count;
+              form.elements[`ver_${name}`].value = s.version;
+            }
+            note.textContent = changed.length ? `Reloaded: ${changed.join(", ")}.` : "Counts are up to date.";
+          } catch (err) {
+            note.textContent = "Could not reload the counts.";
+          }
+        });
+      </script>
+    </section>
+  </aside>
+</div>
+<script>
+  // Show or hide an in-place key point editor, swapping it with the view it replaces.
+  function toggleEditor(id) {
+    const editor = document.getElementById(id);
+    editor.hidden = !editor.hidden;
+    const view = document.getElementById(editor.dataset.view);
+    if (view) view.hidden = !editor.hidden;
+    if (!editor.hidden) editor.querySelector("input").focus();
+  }
+</script>
+{% endblock %}

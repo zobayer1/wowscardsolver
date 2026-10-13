@@ -1,0 +1,97 @@
+{# Environment inputs shared by stages and key points. env: dict (may be missing keys). #}
+{% macro env_fields(env, cards, env_labels) %}
+<div class="fields">
+  {% for f, label in env_labels.items() %}
+  <label>{{ label }}
+    <input name="{{ f }}" type="number" value="{{ env[f] if env[f] }}" placeholder="0">
+  </label>
+  {% endfor %}
+</div>
+<div class="checks">
+  <label class="check"><input type="checkbox" name="no_grey" {{ 'checked' if env.no_grey }}> No grey modifiers</label>
+  <label class="check"><input type="checkbox" name="no_green" {{ 'checked' if env.no_green }}> No green modifiers</label>
+</div>
+<details class="barred" {{ 'open' if env.barred }}>
+  <summary>Barred cards{% if env.barred %} ({{ env.barred|length }}){% endif %}</summary>
+  <div class="check-grid">
+    {% for c in cards %}
+    <label class="check"><input type="checkbox" name="barred" value="{{ c.name }}"
+           {{ 'checked' if c.name in (env.barred or []) }}> {{ c.name }}</label>
+    {% endfor %}
+  </div>
+</details>
+{% endmacro %}
+
+{# One-line description of an environment. #}
+{% macro env_summary(env, env_labels) -%}
+  {%- set parts = [] -%}
+  {%- for f, label in env_labels.items() if env[f] -%}
+    {%- set _ = parts.append(label[:-2] ~ ' ' ~ ('%+d' % env[f]) ~ '%') -%}
+  {%- endfor -%}
+  {%- if env.no_grey and env.no_green %}{% set _ = parts.append('no modifiers') %}
+  {%- elif env.no_grey %}{% set _ = parts.append('no grey modifiers') %}
+  {%- elif env.no_green %}{% set _ = parts.append('no green modifiers') %}{% endif -%}
+  {%- if env.barred %}{% set _ = parts.append('barred: ' ~ env.barred|join(', ')) %}{% endif -%}
+  {{ parts|join(' · ') if parts else 'no conditions' }}
+{%- endmacro %}
+
+{# In-place key point editor: four enemy slots side by side, conditions folded away.
+   The slots are laid out row by row (all powers, then all first vulnerabilities, ...) so
+   Tab moves left to right across the slots. view_id: element hidden while the editor is open. #}
+{% macro keypoint_editor(action, kp, cards, env_labels, vuln_names, id, view_id, open) %}
+{% set enemies = kp.enemies if kp.enemies else [none] * 4 %}
+<form method="post" action="{{ action }}" class="kp-editor" id="{{ id }}"
+      data-view="{{ view_id }}" {{ '' if open else 'hidden' }}>
+  <div class="slot-grid">
+    {% for e in enemies %}<div class="cell top slot-title">Slot {{ loop.index }}</div>{% endfor %}
+    {% for e in enemies %}
+    <label class="cell">Total power
+      <input name="power{{ loop.index }}" type="number" min="1" value="{{ e.power if e }}" placeholder="empty slot">
+    </label>
+    {% endfor %}
+    {% for n in (1, 2) %}
+    {% for e in enemies %}
+    <label class="cell">Vulnerability {{ n }}
+      <select name="vuln{{ n }}_{{ loop.index }}">
+        <option value="">—</option>
+        {% for v in vuln_names %}<option {{ 'selected' if e and e['vuln%d' % n] == v }}>{{ v }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endfor %}
+    {% endfor %}
+    {% for e in enemies %}
+    <label class="cell">Reward
+      <input name="reward{{ loop.index }}" type="number" step="any" min="0"
+             value="{{ '%g' % e.reward if e and e.reward }}" placeholder="0">
+    </label>
+    {% endfor %}
+    {% for e in enemies %}
+    <label class="cell bottom check"><input type="checkbox" name="must_win{{ loop.index }}"
+           {{ 'checked' if e and e.must_win }}> Must win</label>
+    {% endfor %}
+  </div>
+  {% set env = namespace(set=kp.min_wins or kp.barred or kp.no_grey or kp.no_green) %}
+  {% for f in env_labels if kp[f] %}{% set env.set = true %}{% endfor %}
+  <details class="kp-conditions" {{ 'open' if env.set }}>
+    <summary>Key point conditions (optional, added on top of the stage's)</summary>
+    <div class="fields">
+      <label class="narrow">Wins needed here
+        <input name="min_wins" type="number" min="0" value="{{ kp.min_wins if kp.min_wins }}" placeholder="auto"
+               title="Leave blank to let the solver decide how many wins to take here.">
+      </label>
+      <span class="hint end">Blank: the solver splits the stage goal across key points itself.</span>
+    </div>
+    {{ env_fields(kp, cards, env_labels) }}
+  </details>
+  <div class="form-actions">
+    <button class="button primary" type="submit">Save key point</button>
+    <button class="button" type="button" onclick="toggleEditor('{{ id }}')">Cancel</button>
+  </div>
+</form>
+{% endmacro %}
+
+{% macro vulns(e) -%}
+  {{ [e.vuln1, e.vuln2]|select|join(', ') or '—' }}
+{%- endmacro %}
+
+{% macro pct(p) -%}{{ '%.1f' % (p * 100) }}%{%- endmacro %}

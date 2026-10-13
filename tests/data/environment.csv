@@ -2,5 +2,6 @@ setting,keypoint,value
 Firepower,,0
 Survivability,,0
 Maneuverability,,0
-Enemy power,,0
-Wins needed,,0
+Enemy power,2,8
+Wins needed,,8
+Wins needed,3,3

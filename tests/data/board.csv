@@ -1,0 +1,13 @@
+keypoint,slot,power,vuln1,vuln2,reward,must_win
+1,1,154,Smoke Screen,Large Caliber,11,no
+1,2,151,Smoke Screen,Large Caliber,12,no
+1,3,167,Smoke Screen,Air Strike,11,no
+1,4,156,Quick Fire,Air Strike,11,no
+2,1,166,Detection,Large Caliber,17,no
+2,2,185,AA Fire,Smoke Screen,15,no
+2,3,162,Smoke Screen,Air Strike,15,no
+2,4,168,Quick Fire,Air Strike,14,no
+3,1,104,Smoke Screen,Quick Fire,8,no
+3,2,105,Quick Fire,Air Strike,8,no
+3,3,105,Smoke Screen,Air Strike,7,no
+3,4,106,AA Fire,Smoke Screen,7,no

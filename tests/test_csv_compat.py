@@ -1,0 +1,121 @@
+"""Compatibility: the stage described by the CSV files in tests/data, entered through the web
+UI, must give the solver exactly the same inputs and the same best plans as the command-line
+CSV workflow."""
+# pylint: disable=redefined-outer-name, missing-function-docstring, protected-access, too-many-locals
+
+import pytest
+
+from conftest import DATA, set_stock, upload
+
+from webapp import sandbox
+from webapp.db import get_db
+from webapp.engine import solver
+
+COND_FIELDS = {"F": "firepower", "S": "survivability", "M": "maneuverability",
+               "E": "enemy_power", "B": "buff_power", "D": "debuff_power"}
+TOP = 2
+
+
+@pytest.fixture(scope="module")
+def csv_stage():
+    """Roster, key points, stage goal and inventory as the command-line solver loads them."""
+    roster = solver.load_roster(DATA / "roster.csv")
+    inventory = solver.load_modifiers(DATA / "modifiers.csv")
+    keypoints, min_wins = solver.load_stage(DATA / "board.csv", DATA / "environment.csv", roster)
+    return roster, keypoints, min_wins, inventory
+
+
+def env_form(cond, barred, no_mods):
+    """Environment form fields for a condition dict, barred names and blocked slot types."""
+    form = {COND_FIELDS[k]: str(v) for k, v in cond.items()}
+    form["barred"] = sorted(barred)
+    form.update({f"no_{kind}": "on" for kind in no_mods})
+    return form
+
+
+def enemy_form(enemies):
+    form = {}
+    for slot, e in enumerate(enemies, 1):
+        if e is None:
+            continue
+        form[f"power{slot}"] = str(e.power)
+        for n, v in enumerate(e.vulns, 1):
+            form[f"vuln{n}_{slot}"] = v
+        form[f"reward{slot}"] = f"{e.reward:g}"
+        if e.must_win:
+            form[f"must_win{slot}"] = "on"
+    return form
+
+
+@pytest.fixture
+def ui_stage(client, csv_stage, query):
+    """The same game entered through the web routes, as a user would."""
+    roster, keypoints, min_wins, inventory = csv_stage
+    upload(client, (DATA / "roster.csv").read_bytes())
+    client.post("/maps/new", data={"name": "From CSV"})
+    set_stock(client, {n: inventory.get(n, 0) for n in solver.MODIFIERS})
+    ids = {r["name"]: r["id"] for r in query("SELECT id, name FROM map_card WHERE map_id = 1")}
+    client.post("/maps/1/stages/new")
+    cards = {f"hp_{ids[c.name]}": str(c.hp) for c in roster}
+    cards.update({f"used_{ids[c.name]}": "on" for c in roster if c.used})
+    client.post("/maps/1/cards", data=cards)  # after starting the stage, which clears used
+
+    # Stage-wide settings are what every key point shares; the rest goes on each key point.
+    shared_cond = {k: v for k, v in keypoints[0].cond.items()
+                   if all(kp.cond.get(k) == v for kp in keypoints)}
+    shared_barred = frozenset.intersection(*(kp.barred for kp in keypoints))
+    shared_nomods = frozenset.intersection(*(kp.no_mods for kp in keypoints))
+    client.post("/maps/stage/1/env", data={"wins_needed": str(min_wins), "all_keypoints": "on",
+                                           **env_form(shared_cond, shared_barred, shared_nomods)})
+    for kp in keypoints:
+        own_cond = {k: v - shared_cond.get(k, 0) for k, v in kp.cond.items()
+                    if v != shared_cond.get(k, 0)}
+        form = {**enemy_form(kp.enemies),
+                **env_form(own_cond, kp.barred - shared_barred, kp.no_mods - shared_nomods)}
+        if kp.min_wins:
+            form["min_wins"] = str(kp.min_wins)
+        r = client.post("/maps/stage/1/keypoints/new", data=form)
+        assert r.status_code == 302, r.text
+    return client
+
+
+def test_ui_gives_the_solver_the_same_inputs(ui_stage, csv_stage):
+    roster, keypoints, min_wins, inventory = csv_stage
+    with ui_stage.application.app_context():
+        db = get_db()
+        stage = sandbox.load_stage(db, 1)
+        ui_roster = [sandbox.to_solver_card(c, used=bool(c["used"]))
+                     for c in sandbox.map_cards(db, 1)]
+        ui_keypoints = [sandbox._solver_keypoint(stage, kp) for kp in stage["keypoints"]]
+        ui_inventory = sandbox.modifier_counts(db)
+        goal = sandbox.stage_goal(stage, stage["keypoints"])
+    assert sorted(ui_roster, key=lambda c: c.name) == sorted(roster, key=lambda c: c.name)
+    assert goal == min_wins
+    assert ui_inventory == {n: inventory.get(n, 0) for n in solver.MODIFIERS}
+    assert len(ui_keypoints) == len(keypoints)
+    for ui, kp in zip(ui_keypoints, keypoints):
+        assert ui.enemies == kp.enemies
+        assert ui.cond == kp.cond
+        assert ui.min_wins == kp.min_wins
+        assert ui.barred == kp.barred
+        assert ui.no_mods == kp.no_mods
+
+
+@pytest.mark.slow  # solves the full stage twice (a few minutes)
+def test_ui_and_csv_give_the_same_best_plans(ui_stage, csv_stage, solution):
+    roster, keypoints, min_wins, inventory = csv_stage
+    # The map lists cards by name, so solve the CSV roster in that order too: equally ranked
+    # plans are then broken the same way and the placements match exactly.
+    by_name = sorted(roster, key=lambda c: c.name.lower())
+    best, _, _ = solver.solve_stage(by_name, keypoints, min_wins, inventory,
+                                    solver.SearchLimits(top=TOP))
+    ui_stage.post("/maps/stage/1/solve")
+    plans = solution(1)["plans"]
+    assert len(plans) == len(best) == TOP
+    for plan, (combo, st) in zip(plans, best):
+        for key in ("p_goal", "exp_reward", "spend", "exp_wins", "cost"):
+            assert plan[key] == pytest.approx(st[key]), key
+        for pk, (_, slots, mods, _, _) in zip(plan["keypoints"], combo):
+            assert [s["card"] for s in pk["slots"]] == [c.name if c else None for c in slots]
+            assert [s.get("mods", []) for s in pk["slots"] if s["card"]] == \
+                   [list(m) for c, m in zip(slots, mods) if c]

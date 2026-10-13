@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Maps{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Maps <span class="count">{{ maps|length }}</span></h1>
+</div>
+
+{% if maps %}
+<div class="table-wrap">
+  <table class="data">
+    <thead>
+      <tr><th>Name</th><th>Started</th><th class="num">Cards</th><th class="num">Stages</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for m in maps %}
+      <tr>
+        <td class="name"><a href="{{ url_for('maps.view', map_id=m.id) }}" target="_blank">{{ m.name }}</a></td>
+        <td>{{ m.created_at }}</td>
+        <td class="num">{{ m.cards }}</td>
+        <td class="num">{{ m.stages }}</td>
+        <td class="actions">
+          <a class="button small" href="{{ url_for('maps.view', map_id=m.id) }}" target="_blank">Open</a>
+          <form method="post" action="{{ url_for('maps.delete', map_id=m.id) }}"
+                data-confirm="Delete {{ m.name }} and everything recorded in it?"
+                onsubmit="return confirm(this.dataset.confirm);">
+            <button class="button small danger" type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty">
+  <p>No maps yet. Use <strong>New map</strong> at the top to start one with a copy of the roster.</p>
+</div>
+{% endif %}
+{% endblock %}

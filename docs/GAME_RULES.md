@@ -199,54 +199,6 @@ Slot 4: 104
 
 slot 3: 29%, slot 4 33%
 
-Roster:
-
-Daunty 110-120 (35,20,55)
-Vul: Airstrike up
-Buff: Firepowr right
-
-KGV 145-165 (60,60,35)
-Vul: Detection up-right
-Buff: Firepower left
-
-NM 105-125 (50, 50, 15)
-Vul: Large Caliber up-right
-Buff: Firepower left
-
-Sandy 130-150 (35, 35, 70)
-Vul1: AA Fire up
-Vul2: Smoke Screen up-right
-
-Marble 90-110 (30,30,40)
-vul1: Smoke Screen up
-vul2: Quick Fire up-right
-
-Faringar 95-115 (30, 30, 45)
-vul1: AA Fire up-left
-vul2: Smoke Screen up-right
-
-Fjord 90-110 (30,20,50)
-vul: Smoke Screen up-left
-Buff: Survivability left
-
-Vampire 90-110 (30, 20, 50)
-Vul: Quick Fire up-right
-Buff: Maneuverability right
-
-Writer 90-110 (30,30, 40)
-Vul: Smoke Screen up-left
-Buff: Manueverability left
-
-Kiddo 140-160 (45,45,60)
-Vul: Quick Fire up-right
-Buff: Surviavability right
-
-Hugee 100-120 (30,30,50)
-Vul2: quick fire up
-vul2: smoke screen up-right
-
 ## Calculation notes
 
-All buff and debuff % are additive.
-
-Standard rounding is applied and then added.
+All buff and debuff percentages are additive. Rounding is applied to parameters independently before calculating the total power.

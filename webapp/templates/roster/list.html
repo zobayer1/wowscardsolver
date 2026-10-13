@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Roster{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Roster <span class="count">{{ cards|length }} cards</span></h1>
+  <div class="head-actions">
+    <form method="post" action="{{ url_for('roster.import_csv') }}" enctype="multipart/form-data">
+      <label class="button" title="Add or update cards from a roster CSV. Cards with the same name are overwritten.">
+        Import CSV
+        <input type="file" name="file" accept=".csv,text/csv" hidden onchange="this.form.submit()">
+      </label>
+    </form>
+    <a class="button" href="{{ url_for('roster.export_csv') }}"
+       title="Download the roster as roster.csv">Export CSV</a>
+    <a class="button primary" href="{{ url_for('roster.add') }}">Add card</a>
+  </div>
+</div>
+
+{% if cards %}
+<div class="table-wrap">
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th class="num">F</th>
+        <th class="num">S</th>
+        <th class="num">M</th>
+        <th class="num">Total</th>
+        <th>Ability 1</th>
+        <th>Ability 2</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in cards %}
+      <tr>
+        <td class="name">{{ c.name }}</td>
+        <td class="num">{{ c.firepower }}</td>
+        <td class="num">{{ c.survivability }}</td>
+        <td class="num">{{ c.maneuverability }}</td>
+        <td class="num total">{{ c.firepower + c.survivability + c.maneuverability }}</td>
+        {% for n in (1, 2) %}
+        <td>
+          {% set kind = c['ability%d_type' % n] %}
+          {% if kind %}
+            <span class="tag {{ kind }}">{{ kind }}</span> {{ describe(c, n) }}
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        {% endfor %}
+        <td class="actions">
+          <a class="button small" href="{{ url_for('roster.edit', card_id=c.id) }}">Edit</a>
+          <form method="post" action="{{ url_for('roster.delete', card_id=c.id) }}"
+                data-confirm="Remove {{ c.name }} from the roster?"
+                onsubmit="return confirm(this.dataset.confirm);">
+            <button class="button small danger" type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty">
+  <p>The roster is empty.</p>
+  <p>Add cards one by one, or use <strong>Import CSV</strong> to load a roster.csv.</p>
+</div>
+{% endif %}
+{% endblock %}

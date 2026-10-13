@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · Card Solver</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">Card Solver</a>
+    <nav>
+      <a href="{{ url_for('roster.index') }}"
+         class="{{ 'active' if request.blueprint == 'roster' }}">Roster</a>
+      <a href="{{ url_for('maps.index') }}"
+         class="{{ 'active' if request.blueprint == 'maps' }}">Maps</a>
+    </nav>
+    <form class="new-map" method="post" action="{{ url_for('maps.new') }}" target="_blank"
+          onsubmit="setTimeout(() => location.reload(), 800)">
+      <input name="name" placeholder="Map name (optional)" aria-label="Map name">
+      <button class="button primary" type="submit"
+              title="Start a map with a copy of the roster at full HP. Opens in a new tab.">New map</button>
+    </form>
+  </header>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class="flashes">
+          {% for category, message in messages %}
+            <li class="flash {{ category }}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

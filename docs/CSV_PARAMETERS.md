@@ -1,6 +1,6 @@
 # Solver input files
 
-The solver reads four CSV files that sit in the same folder as `solver.py`:
+The command-line solver (`webapp/engine/solver.py`) reads four CSV files from the folder you run it in:
 
 | File | What it describes | When to update it |
 |---|---|---|
@@ -9,16 +9,16 @@ The solver reads four CSV files that sit in the same folder as `solver.py`:
 | `board.csv` | Enemy cards at each key point of the current stage | Every stage |
 | `environment.csv` | Stage goal, battle conditions and restrictions | Every stage |
 
-Run with the default files:
+Run from the project folder with the default files:
 
 ```
-python solver.py
+python -m webapp.engine.solver
 ```
 
 Or with other board and environment files:
 
 ```
-python solver.py my_board.csv my_environment.csv
+python -m webapp.engine.solver my_board.csv my_environment.csv
 ```
 
 General rules for all files:
@@ -147,6 +147,8 @@ One row per setting. Columns: `setting`, `keypoint`, `value`.
 | `Survivability` | blank or key point | whole number | Same, for survivability. |
 | `Maneuverability` | blank or key point | whole number | Same, for maneuverability. |
 | `Enemy power` | blank or key point | whole number | Condition that strengthens enemies, in percent (`8` for +8%). |
+| `Buff power` | blank or key point | whole number | Condition on the strength of your cards' buffs, in percent (`-50` halves them). |
+| `Debuff power` | blank or key point | whole number | Condition on the strength of your cards' debuffs, in percent (`-50` turns a 20% debuff into 10%). |
 | `Barred` | blank or key point | card name | This card may not be placed at that key point (or anywhere, if blank). One row per card. |
 | `No modifiers` | blank or key point | yes | No modifier slots can be used there. |
 | `No grey modifiers` | blank or key point | yes | Grey slot blocked there. |
@@ -173,6 +175,7 @@ No modifiers,2,yes
 - **Your card's parameter:** base × (100% + buffs + modifiers + conditions − 10% per lost HP), rounded to the nearest whole number (halves up). HP loss is a debuff in the same additive pool: 2 HP is −10%, 1 HP is −20%.
 - **Card power:** firepower + survivability + maneuverability. The battle roll is a whole number from power − 10 to power + 10.
 - **Enemy power:** base × (100% − matching debuffs + enemy power condition), rounded to the nearest whole number.
+- **Buff and debuff strength:** each ability's % × (100% + Teamwork or Specialization 100% + buff or debuff power condition). With `Debuff power` at −50%, a 20% debuff becomes 10%, or 30% with Specialization. Unstoppable ignores these conditions for its card's own abilities.
 - **Win chance:** the share of the 21 possible rolls that are at least the enemy's power. Ties are wins.
 
 Plans are ranked by:
