@@ -1,0 +1,12 @@
+name,type,count,value,effect
+Gunnery,grey,2,12,Firepower +20%
+Damage Control,grey,3,12,Survivability +20%
+Dodge,grey,3,12,Maneuverability +20%
+Teamwork,grey,0,12,Buff power x2
+Effectiveness,grey,3,18,Reward +10%
+Morale,grey,0,12,Win counts as 2 toward stage goal and condition removal
+Focused,green,3,15,Disables buffs/debuffs; all parameters +40%
+Specialization,green,3,15,Debuff power x2
+Rabid,green,7,15,Debuffs apply without a matching vulnerability
+Fast Repair,green,8,15,Restores 2 HP (max 3)
+Unstoppable,green,4,15,Ignores battle conditions on this card
