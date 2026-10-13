@@ -28,7 +28,11 @@ def close_db(_exc=None):
 # Columns added after a table was first created: (table, column, declaration).
 MIGRATIONS = [("map_card", "used", "INTEGER NOT NULL DEFAULT 0"),
               *((table, column, "INTEGER NOT NULL DEFAULT 0")
-                for table in ("stage", "keypoint") for column in ("buff_power", "debuff_power"))]
+                for table in ("stage", "keypoint") for column in ("buff_power", "debuff_power")),
+              ("card", "type", "TEXT NOT NULL DEFAULT ''"),
+              ("map_card", "type", "TEXT NOT NULL DEFAULT ''"),
+              ("stage", "barred_types", "TEXT NOT NULL DEFAULT '[]'"),
+              ("keypoint", "barred_types", "TEXT NOT NULL DEFAULT '[]'")]
 
 
 def init_db():
@@ -57,7 +61,8 @@ def _migrate_map_modifiers(db):
 
 
 def card_to_row(card):
-    """Column values for a solver.Card (HP and used are map state, so dropped)."""
+    """Column values for a solver.Card (HP and used are map state, so dropped). The type is
+    left out when unknown (None), so existing types are kept."""
     row = {"name": card.name, "firepower": card.F, "survivability": card.S,
            "maneuverability": card.M}
     for n in (1, 2):
@@ -66,6 +71,8 @@ def card_to_row(card):
         row[f"ability{n}_target"] = a.target if a else None
         row[f"ability{n}_direction"] = a.dir if a else None
         row[f"ability{n}_pct"] = a.pct if a else None
+    if card.type is not None:
+        row["type"] = card.type
     return row
 
 

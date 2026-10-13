@@ -86,7 +86,8 @@ def test_ui_gives_the_solver_the_same_inputs(ui_stage, csv_stage):
         stage = sandbox.load_stage(db, 1)
         ui_roster = [sandbox.to_solver_card(c, used=bool(c["used"]))
                      for c in sandbox.map_cards(db, 1)]
-        ui_keypoints = [sandbox._solver_keypoint(stage, kp) for kp in stage["keypoints"]]
+        cards = sandbox.map_cards(db, 1)
+        ui_keypoints = [sandbox.solver_keypoint(stage, kp, cards) for kp in stage["keypoints"]]
         ui_inventory = sandbox.modifier_counts(db)
         goal = sandbox.stage_goal(stage, stage["keypoints"])
     assert sorted(ui_roster, key=lambda c: c.name) == sorted(roster, key=lambda c: c.name)

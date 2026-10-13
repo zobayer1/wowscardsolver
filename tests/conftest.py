@@ -12,6 +12,8 @@ from webapp import create_app
 from webapp.db import get_db
 
 DATA = Path(__file__).parent / "data"
+# Number of cards in the test roster.
+ROSTER_SIZE = (DATA / "roster.csv").read_text(encoding="utf-8").strip().count("\n")
 
 # Modifier stock every test map starts with.
 STOCK = {"Gunnery": 2, "Damage Control": 3, "Dodge": 3, "Teamwork": 0, "Effectiveness": 3,
@@ -57,7 +59,7 @@ def query(app):
 
 @pytest.fixture
 def roster_csv():
-    """Bytes of the test roster (20 cards)."""
+    """Bytes of the test roster (ROSTER_SIZE cards)."""
     return (DATA / "roster.csv").read_bytes()
 
 
@@ -74,12 +76,12 @@ def loaded(client, roster_csv):
     return client
 
 
-def set_stock(client, counts, map_id=1):
+def set_stock(client, counts):
     """Save modifier counts through the map page form, with the current versions."""
     stock = client.get("/maps/modifiers.json").get_json()
     data = {f"ver_{n}": str(s["version"]) for n, s in stock.items()}
     data.update({f"mod_{n}": str(counts.get(n, s["count"])) for n, s in stock.items()})
-    return client.post(f"/maps/{map_id}/modifiers", data=data, follow_redirects=True)
+    return client.post("/maps/modifiers", data=data, follow_redirects=True)
 
 
 @pytest.fixture

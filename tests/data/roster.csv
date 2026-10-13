@@ -1,21 +1,25 @@
-name,firepower,survivability,maneuverability,hp,used,ability1_type,ability1_target,ability1_direction,ability1_pct,ability2_type,ability2_target,ability2_direction,ability2_pct
-Daunty,35,20,55,3,no,debuff,Air Strike,up,20,buff,Firepower,right,30
-KGV,60,60,35,3,no,debuff,Detection,up-right,20,buff,Firepower,left,30
-NM,50,50,15,3,no,debuff,Large Caliber,up-right,20,buff,Firepower,left,30
-Sandy,35,35,70,3,no,debuff,AA Fire,up,20,debuff,Smoke Screen,up-right,20
-Marble,30,30,40,3,no,debuff,Smoke Screen,up,20,debuff,Quick Fire,up-right,20
-Faringar,30,30,45,3,no,debuff,AA Fire,up-left,20,debuff,Smoke Screen,up-right,20
-Fjord,30,20,50,3,no,debuff,Smoke Screen,up-left,20,buff,Survivability,left,30
-Vampire,30,20,50,3,no,debuff,Quick Fire,up-right,20,buff,Maneuverability,right,30
-Writer,30,30,40,3,no,debuff,Smoke Screen,up-left,20,buff,Maneuverability,left,30
-Kiddo,45,45,60,3,no,debuff,Quick Fire,up-right,20,buff,Survivability,right,30
-Hugee,30,30,50,3,no,debuff,Quick Fire,up,20,debuff,Smoke Screen,up-right,20
-Narly,45,45,50,3,no,debuff,Large Caliber,up-left,20,debuff,Detection,up,20
-Trump,45,30,65,3,no,debuff,Quick Fire,up-left,20,buff,Maneuverability,right,30
-Pulse,45,35,35,3,no,debuff,Large Caliber,up-left,20,buff,Firepower,right,30
-Avenger,60,25,60,3,no,debuff,Detection,up-left,20,debuff,Air Strike,up-right,20
-Hobby,30,30,45,3,no,debuff,Quick Fire,up-left,20,buff,Survivability,left,30
-Ency,80,75,35,3,no,debuff,Large Caliber,up-left,20,debuff,AA Fire,up-right,20
-Clip,45,45,55,3,no,debuff,Quick Fire,up,20,buff,Maneuverability,right,30
-Hellcat,35,25,80,3,no,debuff,Air Strike,up-left,20,debuff,AA Fire,up-right,20
-Jhonny,50,60,70,3,no,debuff,Quick Fire,up-left,20,buff,Survivability,right,30
+name,firepower,survivability,maneuverability,ability1_type,ability1_target,ability1_direction,ability1_pct,ability2_type,ability2_target,ability2_direction,ability2_pct,type
+Daunty,35,20,55,debuff,Air Strike,up,20,buff,Firepower,right,30,flan
+KGV,60,60,35,debuff,Detection,up-right,20,buff,Firepower,left,30,babby
+NM,50,50,15,debuff,Large Caliber,up-right,20,buff,Firepower,left,30,babby
+Sandy,35,35,70,debuff,AA Fire,up,20,debuff,Smoke Screen,up-right,20,cuzr
+Marble,30,30,40,debuff,Smoke Screen,up,20,debuff,Quick Fire,up-right,20,cuzr
+Faringar,30,30,45,debuff,AA Fire,up-left,20,debuff,Smoke Screen,up-right,20,doddy
+Fjord,30,20,50,debuff,Smoke Screen,up-left,20,buff,Survivability,left,30,doddy
+Vampire,30,20,50,debuff,Quick Fire,up-right,20,buff,Maneuverability,right,30,doddy
+Writer,30,30,40,debuff,Smoke Screen,up-left,20,buff,Maneuverability,left,30,cuzr
+Kiddo,45,45,60,debuff,Quick Fire,up-right,20,buff,Survivability,right,30,doddy
+Hugee,30,30,50,debuff,Quick Fire,up,20,debuff,Smoke Screen,up-right,20,doddy
+Narly,45,45,50,debuff,Large Caliber,up-left,20,debuff,Detection,up,20,cuzr
+Trump,45,30,65,debuff,Quick Fire,up-left,20,buff,Maneuverability,right,30,doddy
+Pulse,45,35,35,debuff,Large Caliber,up-left,20,buff,Firepower,right,30,babby
+Avenger,60,25,60,debuff,Detection,up-left,20,debuff,Air Strike,up-right,20,flan
+Hobby,30,30,45,debuff,Quick Fire,up-left,20,buff,Survivability,left,30,cuzr
+Ency,80,75,35,debuff,Large Caliber,up-left,20,debuff,AA Fire,up-right,20,babby
+Clip,45,45,55,debuff,Quick Fire,up,20,buff,Maneuverability,right,30,cuzr
+Hellcat,35,25,80,debuff,Air Strike,up-left,20,debuff,AA Fire,up-right,20,flan
+Jhonny,50,60,70,debuff,Quick Fire,up-left,20,buff,Survivability,right,30,doddy
+Hellduva,75,30,75,buff,Firepower,left,30,debuff,Air Strike,up,20,flan
+Benny,40,40,60,buff,Maneuverability,left,30,debuff,Smoke Screen,up,20,doddy
+Lolorado,65,65,20,debuff,AA Fire,up-left,20,debuff,Large Caliber,up,20,babby
+Bolt,65,65,50,debuff,Detection,up-right,20,buff,Firepower,right,30,cuzr

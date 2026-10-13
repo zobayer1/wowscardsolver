@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from conftest import KEYPOINT_1, KEYPOINT_2, STOCK, flashes
+from conftest import KEYPOINT_1, KEYPOINT_2, ROSTER_SIZE, STOCK, flashes
 
 from webapp import create_app
 
@@ -39,12 +39,13 @@ def record_plan(client, solution, keypoint_id=1, lose_slot=None, grey=None):
 def test_new_map_is_a_snapshot_of_the_roster(loaded, query):
     r = loaded.post("/maps/new", data={"name": ""})
     assert r.headers["Location"].endswith("/maps/1")
-    assert len(query("SELECT * FROM map_card WHERE map_id = 1 AND hp = 3 AND used = 0")) == 20
+    rows = query("SELECT * FROM map_card WHERE map_id = 1 AND hp = 3 AND used = 0")
+    assert len(rows) == ROSTER_SIZE
     html = loaded.get("/maps/1").text
     assert "Map 1" in html and "Start a New Stage" in html and "Stage 1" not in html
     loaded.post("/roster/add", data={"name": "Late", "firepower": "1", "survivability": "1",
                                      "maneuverability": "1"})
-    assert len(query("SELECT * FROM map_card WHERE map_id = 1")) == 20
+    assert len(query("SELECT * FROM map_card WHERE map_id = 1")) == ROSTER_SIZE
 
 
 def test_sync_roster_adds_new_cards_at_full_hp(map1, query):
@@ -58,8 +59,8 @@ def test_sync_roster_adds_new_cards_at_full_hp(map1, query):
     assert late == [{"hp": 3, "used": 0, "firepower": 50}]
     assert query("SELECT hp, used FROM map_card WHERE id = ?", kiddo)[0] == {"hp": 1, "used": 1}
     r = map1.post("/maps/1/sync", follow_redirects=True)
-    assert "The map already has every roster card." in flashes(r.text)
-    assert len(query("SELECT * FROM map_card WHERE map_id = 1")) == 21
+    assert "The map is up to date with the roster." in flashes(r.text)
+    assert len(query("SELECT * FROM map_card WHERE map_id = 1")) == ROSTER_SIZE + 1
 
 
 def test_only_one_open_stage(map1):
@@ -185,7 +186,8 @@ def test_modifier_stock_is_shared_between_maps(stage1, query, solution):
     stage1.post("/maps/stage/1/solve")
     record_plan(stage1, solution, grey="Gunnery")
     stage1.post("/maps/new", data={"name": "Second"})
-    assert len(query("SELECT * FROM map_card WHERE map_id = 2 AND hp = 3 AND used = 0")) == 20
+    rows = query("SELECT * FROM map_card WHERE map_id = 2 AND hp = 3 AND used = 0")
+    assert len(rows) == ROSTER_SIZE
     assert query("SELECT count FROM modifier WHERE name = 'Gunnery'")[0]["count"] == \
         STOCK["Gunnery"] - 1
     assert 'name="mod_Gunnery" type="number" min="0" value="1"' in stage1.get("/maps/2").text
@@ -200,23 +202,23 @@ def stock_form(client):
 
 def test_saving_modifier_counts_bumps_only_changed_versions(map1, query):
     before = {r["name"]: r["version"] for r in query("SELECT name, version FROM modifier")}
-    r = map1.post("/maps/1/modifiers", data=dict(stock_form(map1), mod_Gunnery="7"),
+    r = map1.post("/maps/modifiers", data=dict(stock_form(map1), mod_Gunnery="7"),
                   follow_redirects=True)
     assert "Modifier stock saved: Gunnery 7." in flashes(r.text)
     after = {r["name"]: r["version"] for r in query("SELECT name, version FROM modifier")}
     assert after == dict(before, Gunnery=before["Gunnery"] + 1)
-    r = map1.post("/maps/1/modifiers", data=stock_form(map1), follow_redirects=True)
+    r = map1.post("/maps/modifiers", data=stock_form(map1), follow_redirects=True)
     assert "Modifier stock unchanged." in flashes(r.text)
 
 
 def test_saving_from_an_old_page_is_rejected(map1, query):
     old = stock_form(map1)                       # page A loads the stock
-    map1.post("/maps/1/modifiers", data=dict(stock_form(map1), mod_Rabid="1"))  # page B saves
-    r = map1.post("/maps/1/modifiers", data=dict(old, mod_Gunnery="9"), follow_redirects=True)
+    map1.post("/maps/modifiers", data=dict(stock_form(map1), mod_Rabid="1"))  # page B saves
+    r = map1.post("/maps/modifiers", data=dict(old, mod_Gunnery="9"), follow_redirects=True)
     assert any("changed since this page loaded: Rabid (now 1)" in m for m in flashes(r.text))
     counts = {r["name"]: r["count"] for r in query("SELECT name, count FROM modifier")}
     assert counts["Gunnery"] == STOCK["Gunnery"] and counts["Rabid"] == 1
-    r = map1.post("/maps/1/modifiers", data=dict(old, ver_Gunnery=""), follow_redirects=True)
+    r = map1.post("/maps/modifiers", data=dict(old, ver_Gunnery=""), follow_redirects=True)
     assert any("Nothing was saved" in m for m in flashes(r.text))
 
 
@@ -229,7 +231,7 @@ def test_battles_bump_modifier_versions_and_mark_other_maps_stale(stage1, query,
     stage1.post("/maps/stage/1/solve")
     record_plan(stage1, solution, grey="Gunnery")
     assert query("SELECT solution_stale FROM stage WHERE id = 2")[0]["solution_stale"] == 1
-    r = stage1.post("/maps/2/modifiers", data=old, follow_redirects=True)
+    r = stage1.post("/maps/modifiers", data=old, follow_redirects=True)
     assert any("Gunnery (now 1)" in m for m in flashes(r.text))
 
 
@@ -237,8 +239,9 @@ def test_manual_card_edits(map1, query):
     cid = query("SELECT id FROM map_card WHERE map_id = 1")[0]["id"]
     map1.post("/maps/1/cards", data={f"hp_{cid}": "1", f"used_{cid}": "on"})
     assert query("SELECT hp, used FROM map_card WHERE id = ?", cid)[0] == {"hp": 1, "used": 1}
-    assert len(query("SELECT * FROM map_card WHERE map_id = 1 AND hp = 3 AND used = 0")) == 19
-    r = map1.post("/maps/1/modifiers", data=dict(stock_form(map1), mod_Gunnery="-1"),
+    rows = query("SELECT * FROM map_card WHERE map_id = 1 AND hp = 3 AND used = 0")
+    assert len(rows) == ROSTER_SIZE - 1
+    r = map1.post("/maps/modifiers", data=dict(stock_form(map1), mod_Gunnery="-1"),
                   follow_redirects=True)
     assert "Gunnery must be 0 or more." in flashes(r.text)
 
@@ -263,7 +266,7 @@ def test_debuff_power_condition_reaches_the_solver(map1):
         from webapp import sandbox  # pylint: disable=import-outside-toplevel
         from webapp.db import get_db  # pylint: disable=import-outside-toplevel
         stage = sandbox.load_stage(get_db(), 1)
-        kp = sandbox._solver_keypoint(stage, stage["keypoints"][0])  # pylint: disable=protected-access
+        kp = sandbox.solver_keypoint(stage, stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
     assert kp.cond == {"B": -20, "D": -50}
 
 
@@ -294,3 +297,49 @@ def test_old_per_map_stock_migrates_to_the_shared_stock(tmp_path):
     db.close()
     assert counts["Gunnery"] == 2 and counts["Rabid"] == 7 and counts["Dodge"] == 0
     assert len(counts) == len(STOCK) and "map_modifier" not in tables
+
+
+def test_barred_types_reach_the_solver_and_block_recording(map1, query):
+    types = {r["name"]: r["type"] for r in query("SELECT name, type FROM map_card")}
+    flan = sorted(n for n, t in types.items() if t == "flan")
+    map1.post("/maps/1/stages/new")
+    map1.post("/maps/stage/1/env", data={"wins_needed": "2", "barred_types": ["babby", "nope"]})
+    map1.post("/maps/stage/1/keypoints/new", data=dict(KEYPOINT_2, barred_types="flan"))
+    html = map1.get("/maps/1").text
+    assert "barred types: flan" in html
+    assert 'name="barred_types" value="babby"\n         checked' in html
+    with map1.application.app_context():
+        from webapp import sandbox  # pylint: disable=import-outside-toplevel
+        from webapp.db import get_db  # pylint: disable=import-outside-toplevel
+        stage = sandbox.load_stage(get_db(), 1)
+        assert stage["barred_types"] == ["babby"]
+        kp = sandbox.solver_keypoint(stage, stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
+    assert kp.barred == {n for n, t in types.items() if t in ("babby", "flan")}
+    card = query("SELECT id FROM map_card WHERE name = ?", flan[0])[0]["id"]
+    r = map1.post("/maps/keypoint/1/record", data={"card1": str(card)}, follow_redirects=True)
+    assert f"{flan[0]} is barred here." in r.text
+
+
+def test_sync_roster_updates_types(map1, query):
+    map1.post(f"/roster/{query('SELECT id FROM card WHERE name = ?', 'Daunty')[0]['id']}/edit",
+              data={"name": "Daunty", "firepower": "35", "survivability": "20",
+                    "maneuverability": "55", "type": "cuzr"})
+    r = map1.post("/maps/1/sync", follow_redirects=True)
+    assert "Updated the type of Daunty." in flashes(r.text)
+    assert query("SELECT type FROM map_card WHERE name = 'Daunty'")[0]["type"] == "cuzr"
+
+
+def test_barred_type_locks_its_cards_in_the_list(map1, query):
+    flan = sorted(r["name"] for r in query("SELECT name FROM map_card WHERE type = 'flan'"))
+    map1.post("/maps/1/stages/new")
+    map1.post("/maps/stage/1/env", data={"barred_types": "flan", "barred": ["KGV"]})
+    assert query("SELECT barred FROM stage WHERE id = 1")[0]["barred"] == '["KGV"]'
+    html = map1.get("/maps/1").text
+    stage_form = html[html.index("Stage environment"):html.index("Save stage settings")]
+    for name in flan:
+        box = re.search(rf'<input type="checkbox" name="barred" value="{name}"[^>]*>', stage_form)
+        tag = box.group(0)
+        assert "checked" in tag and "disabled" in tag and 'data-own="0"' in tag
+    kgv = re.search(r'<input type="checkbox" name="barred" value="KGV"[^>]*>', stage_form).group(0)
+    assert "checked" in kgv and "disabled" not in kgv
+    assert f"({len(flan) + 1})" in stage_form

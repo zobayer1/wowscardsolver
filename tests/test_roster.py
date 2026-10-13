@@ -5,7 +5,7 @@ import csv
 import io
 import re
 
-from conftest import DATA, upload
+from conftest import DATA, ROSTER_SIZE, upload
 
 from webapp.engine import solver
 
@@ -62,8 +62,8 @@ def test_remove_card(client):
 
 
 def test_import_adds_then_updates(client, roster_csv):
-    assert "Imported roster.csv: 20 added, 0 updated" in upload(client, roster_csv).text
-    assert "0 added, 20 updated" in upload(client, roster_csv).text
+    assert f"Imported roster.csv: {ROSTER_SIZE} added, 0 updated" in upload(client, roster_csv).text
+    assert f"0 added, {ROSTER_SIZE} updated" in upload(client, roster_csv).text
 
 
 def test_export_round_trips_without_hp_and_used(loaded, roster_csv):
@@ -90,8 +90,46 @@ def test_bad_import_changes_nothing(loaded):
     r = upload(loaded, bad, "bad.csv")
     assert ("Could not import bad.csv: line 3: Broken ability 1: "
             "type must be buff or debuff") in r.text
-    assert '<td class="name">New</td>' not in r.text and "20 cards" in r.text
+    assert '<td class="name">New</td>' not in r.text and f"{ROSTER_SIZE} cards" in r.text
 
 
 def test_import_without_file(client):
     assert "Choose a CSV file" in client.post("/roster/import", follow_redirects=True).text
+
+
+def test_types_import_export_and_form(loaded, query):
+    types = dict((r["name"], r["type"]) for r in query("SELECT name, type FROM card"))
+    assert types["Daunty"] == "flan" and types["KGV"] == "babby"
+    exported = list(csv.DictReader(io.StringIO(loaded.get("/roster/export").data.decode())))
+    assert list(exported[0])[-1] == "type" and exported[0]["type"] == types[exported[0]["name"]]
+    html = loaded.get("/roster/").text
+    assert '<span class="tag kind">doddy</span>' in html
+    form = loaded.get(f"/roster/{card_id(loaded)}/edit").text
+    assert '<datalist id="card-types">' in form and '<option value="cuzr">' in form
+
+
+def test_import_without_type_column_keeps_types(loaded, query):
+    no_type = b"name,firepower,survivability,maneuverability\nDaunty,36,20,55\n"
+    assert "0 added, 1 updated" in upload(loaded, no_type).text
+    row = query("SELECT firepower, type FROM card WHERE name = 'Daunty'")[0]
+    assert row == {"firepower": 36, "type": "flan"}
+
+
+def test_form_sets_and_clears_type(client, query):
+    client.post("/roster/add", data=dict(CARD, type="  doddy "))
+    assert query("SELECT type FROM card")[0]["type"] == "doddy"
+    client.post(f"/roster/{card_id(client)}/edit", data=dict(CARD, type=""))
+    assert query("SELECT type FROM card")[0]["type"] == ""
+
+
+def test_roster_page_has_the_modifier_panel(loaded, query):
+    html = loaded.get("/roster/").text
+    assert 'id="stock-form"' in html and 'name="next" value="/roster/#modifiers"' in html
+    stock = loaded.get("/maps/modifiers.json").get_json()
+    data = {f"ver_{n}": str(s["version"]) for n, s in stock.items()}
+    data.update({f"mod_{n}": str(s["count"]) for n, s in stock.items()})
+    r = loaded.post("/maps/modifiers", data=dict(data, mod_Rabid="5", next="/roster/#modifiers"))
+    assert r.headers["Location"] == "/roster/#modifiers"
+    assert query("SELECT count FROM modifier WHERE name = 'Rabid'")[0]["count"] == 5
+    r = loaded.post("/maps/modifiers", data=dict(data, next="https://example.com/"))
+    assert r.headers["Location"] == "/roster/#modifiers"  # only local pages

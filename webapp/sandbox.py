@@ -14,7 +14,8 @@ from math import prod
 from .engine import solver
 
 CARD_COLS = ("name", "firepower", "survivability", "maneuverability",
-             *(f"ability{n}_{f}" for n in (1, 2) for f in ("type", "target", "direction", "pct")))
+             *(f"ability{n}_{f}" for n in (1, 2) for f in ("type", "target", "direction", "pct")),
+             "type")
 ENV_FIELDS = ("firepower", "survivability", "maneuverability", "enemy_power", "buff_power",
               "debuff_power")
 COND_KEYS = dict(zip(ENV_FIELDS, ("F", "S", "M", "E", "B", "D")))
@@ -41,19 +42,25 @@ def create_map(db, name):
 
 def sync_roster(db, map_id):
     """Copy roster cards the map does not have yet (matched by name) into it, at full HP and
-    unused. Cards already in the map keep their HP, used flag and stats. Returns the names
-    added."""
+    unused, and bring card types up to date. Cards already in the map keep their HP, used
+    flag and stats. Returns (names added, names whose type changed)."""
     cols = ", ".join(CARD_COLS)
     added = [r["name"] for r in db.execute(
         "SELECT name FROM card WHERE name NOT IN (SELECT name FROM map_card WHERE map_id = ?) "
         "ORDER BY name COLLATE NOCASE", (map_id,))]
-    if added:
+    retyped = [r["name"] for r in db.execute(
+        "SELECT m.name FROM map_card m JOIN card c ON c.name = m.name "
+        "WHERE m.map_id = ? AND m.type != c.type ORDER BY m.name COLLATE NOCASE", (map_id,))]
+    if added or retyped:
         with db:
             db.execute(f"INSERT INTO map_card (map_id, {cols}) SELECT ?, {cols} FROM card "
                        f"WHERE name NOT IN (SELECT name FROM map_card WHERE map_id = ?)",
                        (map_id, map_id))
+            db.execute("UPDATE map_card SET type = (SELECT c.type FROM card c "
+                       "WHERE c.name = map_card.name) WHERE map_id = ? "
+                       "AND name IN (SELECT name FROM card)", (map_id,))
             _mark_stale(db, map_id=map_id)
-    return added
+    return added, retyped
 
 
 def map_cards(db, map_id):
@@ -124,6 +131,7 @@ def load_keypoints(db, stage_id):
         "SELECT * FROM keypoint WHERE stage_id = ? ORDER BY number", (stage_id,))]
     for kp in kps:
         kp["barred"] = json.loads(kp["barred"])
+        kp["barred_types"] = json.loads(kp["barred_types"])
         kp["enemies"] = [None] * 4
         for e in db.execute("SELECT * FROM enemy WHERE keypoint_id = ?", (kp["id"],)):
             kp["enemies"][e["slot"] - 1] = dict(e)
@@ -142,6 +150,7 @@ def load_stage(db, stage_id):
         return None
     st = dict(row)
     st["barred"] = json.loads(st["barred"])
+    st["barred_types"] = json.loads(st["barred_types"])
     st["solution"] = json.loads(st["solution"]) if st["solution"] else None
     st["keypoints"] = load_keypoints(db, stage_id)
     st["wins"] = sum(kp["wins"] for kp in st["keypoints"])
@@ -178,7 +187,8 @@ def _check_open(stage):
 def update_stage_env(db, stage, env):
     """Save the stage's environment settings (wins_needed, conditions, bans, all_keypoints)."""
     _check_open(stage)
-    env = dict(env, barred=json.dumps(env["barred"]))
+    env = dict(env, barred=json.dumps(env["barred"]),
+               barred_types=json.dumps(env["barred_types"]))
     with db:
         db.execute(f"UPDATE stage SET {', '.join(f'{k} = ?' for k in env)} WHERE id = ?",
                    [*env.values(), stage["id"]])
@@ -189,7 +199,8 @@ def save_keypoint(db, stage, env, enemies, keypoint_id=None):
     """Add a key point (or replace an unplayed one's settings and enemies).
     enemies: list of 4 dicts or None. Returns the key point id."""
     _check_open(stage)
-    env = dict(env, barred=json.dumps(env["barred"]))
+    env = dict(env, barred=json.dumps(env["barred"]),
+               barred_types=json.dumps(env["barred_types"]))
     with db:
         if keypoint_id is None:
             if len(stage["keypoints"]) >= MAX_KEYPOINTS:
@@ -371,7 +382,7 @@ def _validate_battle(db, stage, kp, entries):
         errors.append("Place at least one card.")
     cards = {c["id"]: c for c in map_cards(db, stage["map_id"])}
     rules = {"enemies": kp["enemies"],
-             "barred": set(stage["barred"]) | set(kp["barred"]),
+             "barred": barred_names(stage, kp, cards.values()),
              "grey": stage["no_grey"] or kp["no_grey"],
              "green": stage["no_green"] or kp["no_green"]}
     seen = set()
@@ -414,7 +425,16 @@ def to_solver_card(row, used=False):
                                      row[f"ability{n}_direction"], row[f"ability{n}_pct"])
                       for n in (1, 2) if row[f"ability{n}_type"])
     return solver.Card(row["name"], row["firepower"], row["survivability"],
-                       row["maneuverability"], abilities, hp=row["hp"], used=used)
+                       row["maneuverability"], abilities, hp=row["hp"], used=used,
+                       type=row["type"])
+
+
+def barred_names(stage, kp, cards):
+    """Names of the map cards barred at a key point: barred by name on the stage or the key
+    point, or of a type barred there."""
+    types = set(stage["barred_types"]) | set(kp["barred_types"])
+    return (frozenset(stage["barred"]) | frozenset(kp["barred"])
+            | {c["name"] for c in cards if c["type"] in types})
 
 
 def _cond(*envs):
@@ -431,14 +451,14 @@ def _no_mods(*envs):
                      for env in envs if env[f"no_{kind}"])
 
 
-def _solver_keypoint(stage, kp):
+def solver_keypoint(stage, kp, cards):
+    """solver.KeyPoint for a key point of a stage, given the map's card rows."""
     enemies = [None if e is None else
                solver.Enemy(e["power"], tuple(v for v in (e["vuln1"], e["vuln2"]) if v),
                             e["reward"], bool(e["must_win"]))
                for e in kp["enemies"]]
     return solver.KeyPoint(str(kp["number"]), enemies, _cond(stage, kp), kp["min_wins"],
-                           frozenset(stage["barred"]) | frozenset(kp["barred"]),
-                           _no_mods(stage, kp))
+                           barred_names(stage, kp, cards), _no_mods(stage, kp))
 
 
 def stage_goal(stage, open_kps):
@@ -460,7 +480,7 @@ def solve(db, stage):
     roster = [to_solver_card(c, used=bool(c["used"])) for c in cards]
     goal = stage_goal(stage, open_kps)
     best, n_plans, n_total = solver.solve_stage(
-        roster, [_solver_keypoint(stage, kp) for kp in open_kps], goal,
+        roster, [solver_keypoint(stage, kp, cards) for kp in open_kps], goal,
         modifier_counts(db), SOLVE_LIMITS)
     ids = {c["name"]: c["id"] for c in cards}
     solution = {"goal": goal, "complete": stage["complete"], "compared": n_plans,

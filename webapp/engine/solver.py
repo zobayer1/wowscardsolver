@@ -102,7 +102,7 @@ def debuff(vuln, direction, pct=20):
 
 
 @dataclass(frozen=True)
-class Card:
+class Card:  # pylint: disable=too-many-instance-attributes  # a plain record
     """One of your cards, with base parameters at full HP."""
     name: str
     F: int  # pylint: disable=invalid-name  # parameter letters as shown in the game
@@ -111,6 +111,7 @@ class Card:
     abilities: tuple
     hp: int = 3
     used: bool = False   # already deployed at a key point this stage
+    type: str | None = None   # your own grouping, used to bar cards by type; None = unknown
 
     @property
     def base_total(self):
@@ -514,8 +515,9 @@ def _ability(row, n):
 
 def parse_roster(rows):
     """Cards from cleaned roster rows. Columns: name, firepower, survivability,
-    maneuverability, [hp, used,] then ability1_* / ability2_* (type, target, direction, pct).
-    Blank ability = none. Raises ValueError naming the bad row."""
+    maneuverability, [hp, used,] then ability1_* / ability2_* (type, target, direction, pct),
+    [type]. Blank ability = none. Without a type column the type is None (unknown), so an
+    import does not wipe types already set. Raises ValueError naming the bad row."""
     cards = []
     for line, row in enumerate(rows, start=2):
         try:
@@ -524,7 +526,8 @@ def parse_roster(rows):
             cards.append(Card(row["name"], int(row["firepower"]), int(row["survivability"]),
                               int(row["maneuverability"]),
                               tuple(a for a in (_ability(row, 1), _ability(row, 2)) if a),
-                              hp=int(row.get("hp") or 3), used=_yes(row.get("used", ""))))
+                              hp=int(row.get("hp") or 3), used=_yes(row.get("used", "")),
+                              type=row.get("type")))
         except KeyError as e:
             raise ValueError(f"line {line}: missing column {e.args[0]!r}") from e
         except ValueError as e:
@@ -577,18 +580,22 @@ def load_environment(path):
     'Wins needed' with a blank keypoint is the stage goal; with a keypoint it is a minimum
     that must also be met at that key point. A condition with a blank keypoint applies to
     every key point; one with a keypoint applies only there (added on top).
-    'Barred' rows name a card (in the value column) that cannot go to that key point.
+    'Barred' rows name a card (in the value column) that cannot go to that key point;
+    'Barred type' rows name a card type, barring every card of that type.
     'No modifiers' / 'No grey modifiers' / 'No green modifiers' (value yes) block modifier
     slots at that key point.
     Returns (stage wins needed, {keypoint or "*": cond dict}, {keypoint: wins needed},
              {keypoint or "*": set of barred card names},
-             {keypoint or "*": set of blocked slot types})."""
-    conds, min_wins, kp_mins, barred, nomods = {}, 0, {}, {}, {}
+             {keypoint or "*": set of blocked slot types},
+             {keypoint or "*": set of barred card types})."""
+    conds, min_wins, kp_mins, barred, nomods, barred_types = {}, 0, {}, {}, {}, {}
     for row in _rows(path):
         key, val = row["setting"].lower(), row.get("value") or "0"
         kp = row.get("keypoint") or "*"
         if key == "barred":
             barred.setdefault(kp, set()).add(row["value"])
+        elif key == "barred type":
+            barred_types.setdefault(kp, set()).add(row["value"])
         elif key in NOMOD_KEYS:
             if _yes(row.get("value", "")):
                 nomods.setdefault(kp, set()).update(NOMOD_KEYS[key])
@@ -602,7 +609,7 @@ def load_environment(path):
             if float(val):
                 c = conds.setdefault(kp, {})
                 c[ENV_KEYS[key]] = c.get(ENV_KEYS[key], 0) + int(float(val))
-    return min_wins, conds, kp_mins, barred, nomods
+    return min_wins, conds, kp_mins, barred, nomods, barred_types
 
 
 def cond_for(conds, kp):
@@ -615,22 +622,40 @@ def cond_for(conds, kp):
 
 def load_stage(board_path, env_path, roster):
     """Key points of the stage from the board and environment files, checked against the
-    roster. Returns (keypoints, stage wins needed)."""
+    roster. Barred types become the names of the roster cards of those types.
+    Returns (keypoints, stage wins needed)."""
     boards = load_board(board_path)
-    min_wins, conds, kp_mins, barred, nomods = (
-        load_environment(env_path) if os.path.exists(env_path) else (0, {}, {}, {}, {}))
-    for k in [*kp_mins, *barred, *conds, *nomods]:
+    env = load_environment(env_path) if os.path.exists(env_path) else (0, {}, {}, {}, {}, {})
+    _check_environment(env, boards, roster)
+    min_wins, conds, kp_mins, barred, nomods, barred_types = env
+    keypoints = [KeyPoint(name, enemies, cond_for(conds, name), kp_mins.get(name, 0),
+                          _barred_at(name, barred, barred_types, roster),
+                          frozenset(nomods.get("*", set()) | nomods.get(name, set())))
+                 for name, enemies in boards.items()]
+    return keypoints, min_wins
+
+
+def _check_environment(env, boards, roster):
+    """Every key point, barred card and barred type the environment names must exist."""
+    _, conds, kp_mins, barred, nomods, barred_types = env
+    for k in [*kp_mins, *barred, *conds, *nomods, *barred_types]:
         assert k == "*" or k in boards, \
             f"environment names key point {k!r}, which is not in the board"
     names = {c.name for c in roster}
     for k, cards in barred.items():
         for c in cards:
             assert c in names, f"barred card {c!r} at key point {k} is not in the roster"
-    keypoints = [KeyPoint(name, enemies, cond_for(conds, name), kp_mins.get(name, 0),
-                          frozenset(barred.get("*", set()) | barred.get(name, set())),
-                          frozenset(nomods.get("*", set()) | nomods.get(name, set())))
-                 for name, enemies in boards.items()]
-    return keypoints, min_wins
+    types = {c.type for c in roster if c.type}
+    for k, kinds in barred_types.items():
+        for t in kinds:
+            assert t in types, f"barred type {t!r} at key point {k}: no roster card has it"
+
+
+def _barred_at(name, barred, barred_types, roster):
+    """Card names barred at key point `name`, by name or by type, stage-wide or there."""
+    kinds = barred_types.get("*", set()) | barred_types.get(name, set())
+    return frozenset(barred.get("*", set()) | barred.get(name, set())
+                     | {c.name for c in roster if c.type in kinds})
 
 
 # ---------------------------------------------------------------- data

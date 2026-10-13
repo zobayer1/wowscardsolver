@@ -48,6 +48,7 @@ One row per card you own.
 | `ability1_direction` | with type | see below | Where the ability lands. |
 | `ability1_pct` | no (default 30 for buff, 20 for debuff) | whole number | Strength in percent, written without the % sign. |
 | `ability2_*` | no | same as above | Second ability. |
+| `type` | no | text | Your own grouping of cards (e.g. `doddy`). Used by `Barred type` in `environment.csv`. Leave the column out of an import to keep the types already set in the web app. |
 
 **Keep base stats in the file.** When a card loses HP, change only `hp`. Do not enter the reduced numbers the game shows.
 
@@ -62,9 +63,9 @@ One row per card you own.
 Example:
 
 ```
-name,firepower,survivability,maneuverability,hp,used,ability1_type,ability1_target,ability1_direction,ability1_pct,ability2_type,ability2_target,ability2_direction,ability2_pct
-Fjord,30,20,50,2,no,debuff,Smoke Screen,up-left,20,buff,Survivability,left,30
-Sandy,35,35,70,3,no,debuff,AA Fire,up,20,debuff,Smoke Screen,up-right,20
+name,firepower,survivability,maneuverability,hp,used,ability1_type,ability1_target,ability1_direction,ability1_pct,ability2_type,ability2_target,ability2_direction,ability2_pct,type
+Fjord,30,20,50,2,no,debuff,Smoke Screen,up-left,20,buff,Survivability,left,30,doddy
+Sandy,35,35,70,3,no,debuff,AA Fire,up,20,debuff,Smoke Screen,up-right,20,cuzr
 ```
 
 ---
@@ -150,6 +151,7 @@ One row per setting. Columns: `setting`, `keypoint`, `value`.
 | `Buff power` | blank or key point | whole number | Condition on the strength of your cards' buffs, in percent (`-50` halves them). |
 | `Debuff power` | blank or key point | whole number | Condition on the strength of your cards' debuffs, in percent (`-50` turns a 20% debuff into 10%). |
 | `Barred` | blank or key point | card name | This card may not be placed at that key point (or anywhere, if blank). One row per card. |
+| `Barred type` | blank or key point | card type | No card of this type may be placed there. One row per type. |
 | `No modifiers` | blank or key point | yes | No modifier slots can be used there. |
 | `No grey modifiers` | blank or key point | yes | Grey slot blocked there. |
 | `No green modifiers` | blank or key point | yes | Green slot blocked there. |

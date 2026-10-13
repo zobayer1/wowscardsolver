@@ -125,6 +125,27 @@ def test_buff_power_condition_scales_buffs():
 def test_environment_csv_reads_buff_and_debuff_power(tmp_path):
     env = tmp_path / "environment.csv"
     env.write_text("setting,keypoint,value\nDebuff power,2,-50\nBuff power,,-20\n")
-    _, conds, _, _, _ = solver.load_environment(env)
+    _, conds, _, _, _, _ = solver.load_environment(env)
     assert conds == {"2": {"D": -50}, "*": {"B": -20}}
     assert solver.cond_for(conds, "2") == {"B": -20, "D": -50}
+
+
+def test_barred_type_in_environment_csv(tmp_path):
+    board = tmp_path / "board.csv"
+    board.write_text("keypoint,slot,power\n1,1,100\n2,1,100\n")
+    env = tmp_path / "environment.csv"
+    env.write_text("setting,keypoint,value\nBarred type,2,flan\nBarred,,C\n")
+    roster = [Card("A", 1, 1, 1, (), type="flan"), Card("B", 1, 1, 1, (), type="flan"),
+              Card("C", 1, 1, 1, (), type="cuzr"), Card("D", 1, 1, 1, ())]
+    keypoints, _ = solver.load_stage(board, env, roster)
+    assert keypoints[0].barred == {"C"}
+    assert keypoints[1].barred == {"A", "B", "C"}
+    env.write_text("setting,keypoint,value\nBarred type,,nope\n")
+    with pytest.raises(AssertionError, match="barred type 'nope'"):
+        solver.load_stage(board, env, roster)
+
+
+def test_parse_roster_reads_type():
+    cards = parse(HEADER.replace("\n", ",type\n") + "A,1,2,3,,,,doddy\nB,1,2,3,,,,\n")
+    assert [c.type for c in cards] == ["doddy", ""]
+    assert parse(HEADER + "A,1,2,3,,,\n")[0].type is None

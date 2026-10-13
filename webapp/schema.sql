@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS card (
     ability2_type       TEXT    CHECK (ability2_type IN ('buff', 'debuff')),
     ability2_target     TEXT,
     ability2_direction  TEXT,
-    ability2_pct        INTEGER
+    ability2_pct        INTEGER,
+    type                TEXT    NOT NULL DEFAULT ''   -- your own grouping, e.g. for bars
 );
 
 -- A map run. Its cards are a snapshot of the roster taken when the map starts, so later
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS map_card (
     ability2_target     TEXT,
     ability2_direction  TEXT,
     ability2_pct        INTEGER,
+    type                TEXT    NOT NULL DEFAULT '',
     hp                  INTEGER NOT NULL DEFAULT 3 CHECK (hp BETWEEN 0 AND 3),
     used                INTEGER NOT NULL DEFAULT 0,   -- fought in the current stage
     UNIQUE (map_id, name)
@@ -66,6 +68,7 @@ CREATE TABLE IF NOT EXISTS stage (
     buff_power       INTEGER NOT NULL DEFAULT 0,
     debuff_power     INTEGER NOT NULL DEFAULT 0,
     barred           TEXT    NOT NULL DEFAULT '[]',
+    barred_types     TEXT    NOT NULL DEFAULT '[]',
     no_grey          INTEGER NOT NULL DEFAULT 0,
     no_green         INTEGER NOT NULL DEFAULT 0,
     all_keypoints    INTEGER NOT NULL DEFAULT 0,   -- every key point of the stage is entered
@@ -87,6 +90,7 @@ CREATE TABLE IF NOT EXISTS keypoint (
     buff_power       INTEGER NOT NULL DEFAULT 0,
     debuff_power     INTEGER NOT NULL DEFAULT 0,
     barred           TEXT    NOT NULL DEFAULT '[]',
+    barred_types     TEXT    NOT NULL DEFAULT '[]',
     no_grey          INTEGER NOT NULL DEFAULT 0,
     no_green         INTEGER NOT NULL DEFAULT 0,
     played           INTEGER NOT NULL DEFAULT 0,

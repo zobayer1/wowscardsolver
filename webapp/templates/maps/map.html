@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "maps/_macros.html" import env_fields, env_summary, keypoint_editor, vulns, pct %}
+{% from "maps/_macros.html" import env_fields, env_summary, keypoint_editor, vulns, pct, barred_types_script %}
 {% block title %}{{ map.name }}{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -58,6 +58,7 @@
       {# key points #}
       {% for kp in st.keypoints %}
       {% set barred = st.barred + kp.barred %}
+      {% set barred_types = st.barred_types + kp.barred_types %}
       {% set editing = draft and draft.kp_id == kp.id %}
       <div class="kp {{ 'played' if kp.played }}" id="kp-{{ kp.id }}">
         <div class="kp-head">
@@ -108,7 +109,7 @@
                 {% else %}
                 <select name="card{{ slot }}" aria-label="Your card in slot {{ slot }}">
                   <option value="">Your card…</option>
-                  {% for c in cards if c.hp > 0 and not c.used and c.name not in barred %}
+                  {% for c in cards if c.hp > 0 and not c.used and c.name not in barred and c.type not in barred_types %}
                   <option value="{{ c.id }}">{{ c.name }} ({{ c.firepower + c.survivability + c.maneuverability }}, HP {{ c.hp }})</option>
                   {% endfor %}
                 </select>
@@ -337,7 +338,7 @@
           <tbody>
             {% for c in cards %}
             <tr class="{{ 'out' if c.hp == 0 }} {{ 'is-used' if c.used }}" title="{{ [describe(c, 1), describe(c, 2)]|select|join(' · ') }}">
-              <td class="name">{{ c.name }}</td>
+              <td class="name">{{ c.name }}{% if c.type %} <span class="muted small">{{ c.type }}</span>{% endif %}</td>
               <td class="num">{{ c.firepower + c.survivability + c.maneuverability }}</td>
               <td>
                 <select name="hp_{{ c.id }}" class="hp hp{{ c.hp }}" aria-label="HP of {{ c.name }}">
@@ -357,50 +358,7 @@
       </form>
     </section>
 
-    <section class="panel" id="modifiers">
-      <div class="panel-head"><h2>Modifiers</h2>
-        <span class="muted">shared by all maps</span>
-        <button class="button small push-right" type="button" id="reload-stock"
-                title="Load the current counts, e.g. after another map used or changed some">Reload counts</button>
-      </div>
-      <form method="post" action="{{ url_for('maps.set_modifiers', map_id=map.id) }}" id="stock-form">
-        {% for group, names in (('Grey', grey_mods), ('Green', green_mods)) %}
-        <h3 class="group">{{ group }}</h3>
-        <div class="mod-grid">
-          {% for n in names %}
-          <label>{{ n }}<input name="mod_{{ n }}" type="number" min="0" value="{{ stock[n].count }}"></label>
-          <input type="hidden" name="ver_{{ n }}" value="{{ stock[n].version }}">
-          {% endfor %}
-        </div>
-        {% endfor %}
-        <div class="form-actions">
-          <button class="button small" type="submit">Save stock</button>
-          <span class="hint" id="stock-note">Applied plans and recorded battles take used modifiers off.</span>
-        </div>
-      </form>
-      <script>
-        // Refresh just the modifier counts (and their versions) without reloading the page.
-        document.getElementById("reload-stock").addEventListener("click", async () => {
-          const note = document.getElementById("stock-note");
-          try {
-            const r = await fetch("{{ url_for('maps.modifiers_json') }}", {cache: "no-store"});
-            const stock = await r.json();
-            const form = document.getElementById("stock-form");
-            const changed = [];
-            for (const [name, s] of Object.entries(stock)) {
-              const input = form.elements[`mod_${name}`];
-              if (!input) continue;
-              if (Number(input.value) !== s.count) changed.push(`${name} ${s.count}`);
-              input.value = s.count;
-              form.elements[`ver_${name}`].value = s.version;
-            }
-            note.textContent = changed.length ? `Reloaded: ${changed.join(", ")}.` : "Counts are up to date.";
-          } catch (err) {
-            note.textContent = "Could not reload the counts.";
-          }
-        });
-      </script>
-    </section>
+    {% include "_modifiers_panel.html" %}
   </aside>
 </div>
 <script>
@@ -413,4 +371,5 @@
     if (!editor.hidden) editor.querySelector("input").focus();
   }
 </script>
+{{ barred_types_script() }}
 {% endblock %}

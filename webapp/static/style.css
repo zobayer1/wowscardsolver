@@ -473,3 +473,6 @@ button.result:hover { border-color: var(--border); background: var(--surface); }
 .slot-grid .cell.check { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
 .slot-grid input:not([type=checkbox]), .slot-grid select { width: 100%; padding: 5px 7px; }
 .slot-grid input[name^=power] { font-size: 16px; font-weight: 600; }
+/* Card type */
+.tag.kind { background: #f1f5f9; color: #334155; text-transform: none; min-width: 0; font-weight: 500; }
+.checks.barred-types { align-items: center; }

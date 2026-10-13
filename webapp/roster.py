@@ -7,6 +7,7 @@ import sqlite3
 from flask import (Blueprint, Response, abort, flash, redirect, render_template, request,
                    url_for)
 
+from . import sandbox
 from .db import get_db, import_cards
 from .engine import solver
 
@@ -26,7 +27,14 @@ ABILITY_CHOICES = {
 STAT_FIELDS = ("firepower", "survivability", "maneuverability")
 CSV_COLUMNS = ("name", *STAT_FIELDS,
                *(f"ability{n}_{f}" for n in (1, 2)
-                 for f in ("type", "target", "direction", "pct")))
+                 for f in ("type", "target", "direction", "pct")),
+               "type")
+
+
+def card_types(db):
+    """Card types in use in the roster, sorted."""
+    return [r["type"] for r in db.execute(
+        "SELECT DISTINCT type FROM card WHERE type != '' ORDER BY type COLLATE NOCASE")]
 
 
 def describe_ability(card, n):
@@ -44,7 +52,7 @@ def describe_ability(card, n):
 def parse_form(form):
     """Card column values from the submitted form, and a list of error messages."""
     errors = []
-    row = {"name": form.get("name", "").strip()}
+    row = {"name": form.get("name", "").strip(), "type": form.get("type", "").strip()}
     if not row["name"]:
         errors.append("Name is required.")
     for field in STAT_FIELDS:
@@ -93,7 +101,8 @@ def get_card(card_id):
 
 def _render_form(card, title):
     return render_template("roster/form.html", card=card, title=title,
-                           choices=ABILITY_CHOICES, default_pct=DEFAULT_PCT)
+                           choices=ABILITY_CHOICES, default_pct=DEFAULT_PCT,
+                           types=card_types(get_db()))
 
 
 def _save(row, card_id=None):
@@ -115,9 +124,12 @@ def _save(row, card_id=None):
 
 @bp.route("/")
 def index():
-    """The roster table."""
-    cards = get_db().execute("SELECT * FROM card ORDER BY name COLLATE NOCASE").fetchall()
-    return render_template("roster/list.html", cards=cards, describe=describe_ability)
+    """The roster table, with the shared modifier stock alongside."""
+    db = get_db()
+    cards = db.execute("SELECT * FROM card ORDER BY name COLLATE NOCASE").fetchall()
+    return render_template("roster/list.html", cards=cards, describe=describe_ability,
+                           stock=sandbox.modifier_stock(db), grey_mods=sandbox.GREY_MODS,
+                           green_mods=sandbox.GREEN_MODS)
 
 
 @bp.route("/add", methods=("GET", "POST"))

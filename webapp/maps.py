@@ -57,11 +57,13 @@ def _int(form, field, errors, label, minimum=None):
     return value
 
 
-def parse_env(form, card_names):
+def parse_env(form, cards):
     """Environment fields shared by stages and key points, and a list of errors."""
     errors = []
     env = {f: _int(form, f, errors, ENV_LABELS[f]) for f in sandbox.ENV_FIELDS}
-    env["barred"] = [n for n in form.getlist("barred") if n in card_names]
+    env["barred"] = [n for n in form.getlist("barred") if n in {c["name"] for c in cards}]
+    env["barred_types"] = [t for t in form.getlist("barred_types")
+                           if t in {c["type"] for c in cards if c["type"]}]
     env["no_grey"] = int("no_grey" in form)
     env["no_green"] = int("no_green" in form)
     return env, errors
@@ -186,18 +188,25 @@ def set_cards(map_id):
 
 @bp.route("/<int:map_id>/sync", methods=("POST",))
 def sync_roster(map_id):
-    """Bring cards added to the roster since the map started into the map."""
+    """Bring cards added to the roster since the map started, and card types, into the map."""
     _get_map(map_id)
-    added = sandbox.sync_roster(get_db(), map_id)
-    flash(f"Added {', '.join(added)} at 3 HP." if added else
-          "The map already has every roster card.")
+    added, retyped = sandbox.sync_roster(get_db(), map_id)
+    parts = ([f"Added {', '.join(added)} at 3 HP."] if added else []) + \
+            ([f"Updated the type of {', '.join(retyped)}."] if retyped else [])
+    flash(" ".join(parts) or "The map is up to date with the roster.")
     return _to_map(map_id, "cards")
 
 
-@bp.route("/<int:map_id>/modifiers", methods=("POST",))
-def set_modifiers(map_id):
-    """Save the shared modifier stock, unless it changed since the page was loaded."""
-    _get_map(map_id)
+def _local_next(default):
+    """The form's `next` page if it is a path on this site, else `default`."""
+    target = request.form.get("next", "")
+    return target if target.startswith("/") and not target.startswith("//") else default
+
+
+@bp.route("/modifiers", methods=("POST",))
+def set_modifiers():
+    """Save the shared modifier stock, unless it changed since the page was loaded; then go
+    back to the page the form was on."""
     errors = []
     counts = {n: _int(request.form, f"mod_{n}", errors, n, minimum=0) for n in solver.MODIFIERS}
     versions = {}
@@ -214,7 +223,7 @@ def set_modifiers(map_id):
         except sandbox.SandboxError as e:
             errors.append(str(e))
     _flash_errors(errors)
-    return _to_map(map_id, "modifiers")
+    return redirect(_local_next(url_for("roster.index") + "#modifiers"))
 
 
 @bp.route("/modifiers.json")
@@ -250,8 +259,7 @@ def _stage_action(stage_id, action, message):
 def stage_env(stage_id):
     """Save the stage's environment."""
     stage = _get_stage(stage_id)
-    names = {c["name"] for c in sandbox.map_cards(get_db(), stage["map_id"])}
-    env, errors = parse_env(request.form, names)
+    env, errors = parse_env(request.form, sandbox.map_cards(get_db(), stage["map_id"]))
     env["wins_needed"] = _int(request.form, "wins_needed", errors, "Wins needed", minimum=0)
     env["all_keypoints"] = int("all_keypoints" in request.form)
     if errors:
@@ -303,8 +311,7 @@ def delete_stage(stage_id):
 def _save_keypoint(stage, keypoint_id=None):
     """Save the posted key point form. On errors, show the map again with the form open
     and the entered values kept."""
-    names = {c["name"] for c in sandbox.map_cards(get_db(), stage["map_id"])}
-    env, errors = parse_env(request.form, names)
+    env, errors = parse_env(request.form, sandbox.map_cards(get_db(), stage["map_id"]))
     env["min_wins"] = _int(request.form, "min_wins", errors, "Wins needed here", minimum=0)
     enemies, enemy_errors = parse_enemies(request.form)
     errors += enemy_errors

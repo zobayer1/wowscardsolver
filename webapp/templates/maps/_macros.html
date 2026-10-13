@@ -11,15 +11,57 @@
   <label class="check"><input type="checkbox" name="no_grey" {{ 'checked' if env.no_grey }}> No grey modifiers</label>
   <label class="check"><input type="checkbox" name="no_green" {{ 'checked' if env.no_green }}> No green modifiers</label>
 </div>
-<details class="barred" {{ 'open' if env.barred }}>
-  <summary>Barred cards{% if env.barred %} ({{ env.barred|length }}){% endif %}</summary>
+{% set types = cards|map(attribute='type')|select|unique|sort|list %}
+{% if types %}
+<div class="checks barred-types">
+  <span class="muted">Barred types:</span>
+  {% for t in types %}
+  <label class="check"><input type="checkbox" name="barred_types" value="{{ t }}"
+         {{ 'checked' if t in (env.barred_types or []) }}> {{ t }}
+    <span class="muted">({{ cards|selectattr('type', 'equalto', t)|list|length }})</span></label>
+  {% endfor %}
+</div>
+{% endif %}
+{# Cards of a barred type show as ticked and locked (not submitted, so they are not stored
+   as individual bars); data-own keeps the card's own setting for when the type is unticked. #}
+{% set by_type = env.barred_types or [] %}
+<details class="barred" {{ 'open' if env.barred or by_type }}>
+  <summary>Barred cards <span class="barred-count">{% set n = cards|selectattr('name', 'in', env.barred or [])|list|length
+    + cards|rejectattr('name', 'in', env.barred or [])|selectattr('type', 'in', by_type)|list|length %}{{ '(%d)' % n if n }}</span></summary>
   <div class="check-grid">
     {% for c in cards %}
-    <label class="check"><input type="checkbox" name="barred" value="{{ c.name }}"
-           {{ 'checked' if c.name in (env.barred or []) }}> {{ c.name }}</label>
+    {% set own = c.name in (env.barred or []) %}
+    {% set typed = c.type and c.type in by_type %}
+    <label class="check" {% if typed %}title="barred by type {{ c.type }}"{% endif %}>
+      <input type="checkbox" name="barred" value="{{ c.name }}" data-type="{{ c.type }}"
+             data-own="{{ 1 if own else 0 }}" {{ 'checked' if own or typed }} {{ 'disabled' if typed }}>
+      {{ c.name }} {% if c.type %}<span class="muted">{{ c.type }}</span>{% endif %}</label>
     {% endfor %}
   </div>
 </details>
+{% endmacro %}
+
+{# Keeps the Barred cards list in step with the Barred types boxes; include once per page. #}
+{% macro barred_types_script() %}
+<script>
+  document.addEventListener("change", e => {
+    const box = e.target;
+    if (box.name !== "barred_types" && box.name !== "barred") return;
+    const form = box.form;
+    if (box.name === "barred") {
+      box.dataset.own = box.checked ? "1" : "0";
+    } else {
+      for (const card of form.querySelectorAll(`input[name=barred][data-type="${CSS.escape(box.value)}"]`)) {
+        card.disabled = box.checked;
+        card.checked = box.checked || card.dataset.own === "1";
+        card.closest("label").title = box.checked ? `barred by type ${box.value}` : "";
+      }
+      if (box.checked) form.querySelector("details.barred").open = true;
+    }
+    const n = form.querySelectorAll("input[name=barred]:checked").length;
+    form.querySelector(".barred-count").textContent = n ? `(${n})` : "";
+  });
+</script>
 {% endmacro %}
 
 {# One-line description of an environment. #}
@@ -31,6 +73,7 @@
   {%- if env.no_grey and env.no_green %}{% set _ = parts.append('no modifiers') %}
   {%- elif env.no_grey %}{% set _ = parts.append('no grey modifiers') %}
   {%- elif env.no_green %}{% set _ = parts.append('no green modifiers') %}{% endif -%}
+  {%- if env.barred_types %}{% set _ = parts.append('barred types: ' ~ env.barred_types|join(', ')) %}{% endif -%}
   {%- if env.barred %}{% set _ = parts.append('barred: ' ~ env.barred|join(', ')) %}{% endif -%}
   {{ parts|join(' · ') if parts else 'no conditions' }}
 {%- endmacro %}
@@ -70,7 +113,7 @@
            {{ 'checked' if e and e.must_win }}> Must win</label>
     {% endfor %}
   </div>
-  {% set env = namespace(set=kp.min_wins or kp.barred or kp.no_grey or kp.no_green) %}
+  {% set env = namespace(set=kp.min_wins or kp.barred or kp.barred_types or kp.no_grey or kp.no_green) %}
   {% for f in env_labels if kp[f] %}{% set env.set = true %}{% endfor %}
   <details class="kp-conditions" {{ 'open' if env.set }}>
     <summary>Key point conditions (optional, added on top of the stage's)</summary>

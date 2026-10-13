@@ -9,8 +9,13 @@
   <fieldset>
     <legend>Card</legend>
     <div class="fields">
-      <label class="wide">Name
+      <label>Name
         <input name="name" value="{{ card.name or '' }}" required autofocus>
+      </label>
+      <label>Type
+        <input name="type" value="{{ card.type or '' }}" list="card-types" autocomplete="off"
+               placeholder="optional, e.g. for barring by type">
+        <datalist id="card-types">{% for t in types %}<option value="{{ t }}">{% endfor %}</datalist>
       </label>
       <label>Firepower
         <input name="firepower" type="number" min="0" value="{{ card.firepower if card.firepower is not none }}" required>
