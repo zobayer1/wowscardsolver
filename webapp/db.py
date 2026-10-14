@@ -32,7 +32,12 @@ MIGRATIONS = [("map_card", "used", "INTEGER NOT NULL DEFAULT 0"),
               ("card", "type", "TEXT NOT NULL DEFAULT ''"),
               ("map_card", "type", "TEXT NOT NULL DEFAULT ''"),
               ("stage", "barred_types", "TEXT NOT NULL DEFAULT '[]'"),
-              ("keypoint", "barred_types", "TEXT NOT NULL DEFAULT '[]'")]
+              ("keypoint", "barred_types", "TEXT NOT NULL DEFAULT '[]'"),
+              ("enemy", "boost", "INTEGER NOT NULL DEFAULT 0")]
+
+
+# Columns no longer used: (table, column). Dropped when present.
+DROPPED = [("enemy", "reward")]
 
 
 def init_db():
@@ -42,6 +47,9 @@ def init_db():
     for table, column, decl in MIGRATIONS:
         if column not in {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}:
             db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    for table, column in DROPPED:
+        if column in {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}:
+            db.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
     _migrate_map_modifiers(db)
     db.executemany("INSERT OR IGNORE INTO modifier (name) VALUES (?)",
                    [(n,) for n in solver.MODIFIERS])

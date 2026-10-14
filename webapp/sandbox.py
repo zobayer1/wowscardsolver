@@ -20,7 +20,9 @@ ENV_FIELDS = ("firepower", "survivability", "maneuverability", "enemy_power", "b
               "debuff_power")
 COND_KEYS = dict(zip(ENV_FIELDS, ("F", "S", "M", "E", "B", "D")))
 MAX_KEYPOINTS = 5
-SOLVE_LIMITS = solver.SearchLimits(top=2)
+# Two plans; the option trim widens while a solve stays within about 20 seconds.
+# Plan 2 must change at least 3 card assignments from plan 1, to be a real alternative.
+SOLVE_LIMITS = solver.SearchLimits(top=2, time_budget=20, distinct=3)
 GREY_MODS = [n for n, (kind, _) in solver.MODIFIERS.items() if kind == "grey"]
 GREEN_MODS = [n for n, (kind, _) in solver.MODIFIERS.items() if kind == "green"]
 
@@ -218,9 +220,9 @@ def save_keypoint(db, stage, env, enemies, keypoint_id=None):
                        [*env.values(), keypoint_id])
             db.execute("DELETE FROM enemy WHERE keypoint_id = ?", (keypoint_id,))
         db.executemany(
-            "INSERT INTO enemy (keypoint_id, slot, power, vuln1, vuln2, reward, must_win) "
+            "INSERT INTO enemy (keypoint_id, slot, power, vuln1, vuln2, must_win, boost) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [(keypoint_id, i + 1, e["power"], e["vuln1"], e["vuln2"], e["reward"], e["must_win"])
+            [(keypoint_id, i + 1, e["power"], e["vuln1"], e["vuln2"], e["must_win"], e["boost"])
              for i, e in enumerate(enemies) if e is not None])
         _mark_stale(db, stage_id=stage["id"])
     return keypoint_id
@@ -455,7 +457,7 @@ def solver_keypoint(stage, kp, cards):
     """solver.KeyPoint for a key point of a stage, given the map's card rows."""
     enemies = [None if e is None else
                solver.Enemy(e["power"], tuple(v for v in (e["vuln1"], e["vuln2"]) if v),
-                            e["reward"], bool(e["must_win"]))
+                            bool(e["must_win"]), e["boost"])
                for e in kp["enemies"]]
     return solver.KeyPoint(str(kp["number"]), enemies, _cond(stage, kp), kp["min_wins"],
                            barred_names(stage, kp, cards), _no_mods(stage, kp))
@@ -479,23 +481,28 @@ def solve(db, stage):
     cards = map_cards(db, stage["map_id"])
     roster = [to_solver_card(c, used=bool(c["used"])) for c in cards]
     goal = stage_goal(stage, open_kps)
+    search = {}
     best, n_plans, n_total = solver.solve_stage(
         roster, [solver_keypoint(stage, kp, cards) for kp in open_kps], goal,
-        modifier_counts(db), SOLVE_LIMITS)
+        modifier_counts(db), SOLVE_LIMITS, report=search)
     ids = {c["name"]: c["id"] for c in cards}
     solution = {"goal": goal, "complete": stage["complete"], "compared": n_plans,
-                "variants": n_total, "solved_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "plans": [_plan_json(combo, st, open_kps, ids) for combo, st in best]}
+                "variants": n_total, "options": search["options"], "exact": search["exact"],
+                "solved_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "plans": [_plan_json(combo, st, open_kps, ids, best[0][0] if i else None)
+                          for i, (combo, st) in enumerate(best)]}
     with db:
         db.execute("UPDATE stage SET solution = ?, solution_stale = 0 WHERE id = ?",
                    (json.dumps(solution), stage["id"]))
     return solution
 
 
-SUMMARY_KEYS = ("exp_reward", "spend", "exp_wins", "cost")
+SUMMARY_KEYS = ("spend", "exp_wins", "cost")
 
 
-def _plan_json(combo, st, open_kps, ids):
+def _plan_json(combo, st, open_kps, ids, first=None):
+    """A plan for the page; `first` (plan 1) adds which cards this plan assigns
+    differently."""
     keypoints = []
     for kp, (_, _, mods, res, sm) in zip(open_kps, combo):
         slots = []
@@ -510,5 +517,6 @@ def _plan_json(combo, st, open_kps, ids):
     risky = sorted(keypoints, key=lambda k: k["p_all"])
     return {"p_goal": st["p_goal"], **{k: st[k] for k in SUMMARY_KEYS},
             "keypoints": keypoints,
+            "changed": sorted(solver.changed_cards(combo, first)) if first else [],
             "order": None if all(k["p_all"] >= 1 for k in keypoints) or len(keypoints) < 2
             else [k["number"] for k in risky]}

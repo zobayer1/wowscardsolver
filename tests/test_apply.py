@@ -95,3 +95,9 @@ def test_apply_refuses_a_plan_beyond_the_modifier_stock(solved, query):
     r = solved.post("/maps/stage/1/apply/0", follow_redirects=True)
     assert "Only 0 Gunnery left" in r.text
     assert query("SELECT COUNT(*) AS n FROM battle")[0]["n"] == 0
+
+
+def test_plan_two_is_a_real_alternative(solved, solution):
+    plans = solution(1)["plans"]
+    assert len(plans) == 2 and plans[0]["changed"] == [] and len(plans[1]["changed"]) >= 3
+    assert f"{len(plans[1]['changed'])} cards differ from plan 1" in solved.get("/maps/1").text

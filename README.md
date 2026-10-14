@@ -6,8 +6,8 @@ point of a map stage, and with which modifiers, so that you meet the stage goal 
 possible. See the [game rules](./docs/GAME_RULES.md) and
 [how the solver works](./docs/SOLVER.md).
 
-It comes as a small Flask web app that tracks a whole map for you (HP, used cards and the
-modifier stock), plus the original command-line solver that reads CSV files.
+It is a small Flask web app that tracks a whole map for you: HP, used cards and the
+modifier stock.
 
 ## Features
 
@@ -18,7 +18,8 @@ modifier stock), plus the original command-line solver that reads CSV files.
 - **Stages and key points:** enter up to 5 key points per stage, one at a time, with the
   stage goal and battle conditions: % conditions, barred cards or card types, blocked
   modifier slots.
-- **Solver:** suggests the two best plans; **Apply plan** records the battles, takes 1 HP from
+- **Solver:** suggests the best plan and a real alternative (one that assigns at least 3 cards
+  differently); **Apply plan** records the battles, takes 1 HP from
   each card, marks the cards used and spends the modifiers.
 - **Modifier stock:** shared by all maps, with a version on every count, so saving from an
   out-of-date page is refused.
@@ -76,42 +77,27 @@ flask --app webapp import-roster path/to/roster.csv
    differently by clicking its Won / Lost.
 5. **Finish stage**: used marks clear and HP carries over into the next stage.
 
-## Command-line solver
-
-The original CSV workflow still works and gives the same results as the web app. It reads
-`roster.csv`, `modifiers.csv`, `board.csv` and `environment.csv` from the current folder:
-
-```
-python -m webapp.engine.solver
-python -m webapp.engine.solver my_board.csv my_environment.csv
-```
-
-The file formats are described in [docs/CSV_PARAMETERS.md](./docs/CSV_PARAMETERS.md). The
-files in [`tests/data`](./tests/data) are a complete example. To solve it, run the solver from
-that folder with the project folder on `PYTHONPATH`:
-
-```
-cd tests/data
-PYTHONPATH=../.. python -m webapp.engine.solver                         # macOS / Linux
-$env:PYTHONPATH = "../.."; python -m webapp.engine.solver               # Windows PowerShell
-```
+The roster CSV format is described in [docs/CSV_PARAMETERS.md](./docs/CSV_PARAMETERS.md).
 
 ## Tests
 
 ```
-python -m pytest            # the regular suite, about 2 minutes
-python -m pytest -m slow    # full-size solver runs, several minutes
+python -m pytest            # about a minute
 ```
 
-The slow test builds the stage in `tests/data` through the web app and checks that the
-solver gets the same inputs, and returns the same plans, as the command-line CSV workflow.
+Among them:
+- `tests/test_search.py` checks the fast search against the plain exhaustive search on
+  generated stages.
+- `tests/test_csv_compat.py` builds the stage described by the CSV files in `tests/data`
+  through the web app and checks that the solver gets the same inputs, and returns the same
+  plans, as solving those files directly.
 
 ## Cautions
 
-- **Solving can take minutes.** The search is exhaustive: one key point takes seconds, but
-  three key points with 20–24 cards can take 2–5 minutes. The page waits until the solve
-  finishes, so don't resubmit. Barred, used or 0 HP cards make it faster. See
-  [why it can take minutes](./docs/SOLVER.md#why-it-can-take-minutes).
+- **Solving takes up to about 20 seconds.** 1–2 key points take a few seconds. With 3 or more,
+  the solver uses spare time, up to a budget of about 20 seconds, to search more options; the
+  map page says whether it searched every option. The page waits until the solve finishes, so
+  don't resubmit. See [how long a solve takes](./docs/SOLVER.md#how-long-a-solve-takes).
 - **Local and single-user.** The app runs on Flask's development server with no login and a
   built-in development secret key. Keep it on your own machine. To change the key, put
   `SECRET_KEY = "..."` in `instance/config.py`.
@@ -126,7 +112,9 @@ solver gets the same inputs, and returns the same plans, as the command-line CSV
 
 ```
 webapp/
-  engine/solver.py    battle model, search, CSV loaders and the command-line entry point
+  engine/model.py     battle model: scores a placement of cards at a key point
+  engine/search.py    stage search (solve_stage)
+  engine/solver.py    CSV readers and validate(); re-exports the engine
   sandbox.py          maps, stages, key points, battles and the modifier stock
   maps.py, roster.py  web pages
   db.py, schema.sql   SQLite database and migrations

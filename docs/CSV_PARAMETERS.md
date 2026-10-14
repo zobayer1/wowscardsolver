@@ -1,25 +1,16 @@
-# Solver input files
+# CSV files
 
-The command-line solver (`webapp/engine/solver.py`) reads four CSV files from the folder you run it in:
-
-| File | What it describes | When to update it |
+| File | What it describes | Used by |
 |---|---|---|
-| `roster.csv` | Your cards | After every battle (HP), after buying a card |
-| `modifiers.csv` | Your modifier stock | When you gain, buy or spend modifiers |
-| `board.csv` | Enemy cards at each key point of the current stage | Every stage |
-| `environment.csv` | Stage goal, battle conditions and restrictions | Every stage |
+| `roster.csv` | Your cards | **Import CSV** / **Export CSV** on the Roster page |
+| `modifiers.csv` | A modifier stock | the example stage in `tests/data` |
+| `board.csv` | Enemy cards at each key point of a stage | the example stage in `tests/data` |
+| `environment.csv` | Stage goal, battle conditions and restrictions | the example stage in `tests/data` |
 
-Run from the project folder with the default files:
-
-```
-python -m webapp.engine.solver
-```
-
-Or with other board and environment files:
-
-```
-python -m webapp.engine.solver my_board.csv my_environment.csv
-```
+In the web app you enter stages, key points and modifier counts on the map page; only the
+roster is exchanged as a CSV file. The other three files describe a complete stage for the
+tests (`tests/test_csv_compat.py` checks that entering it through the web app gives the solver
+the same inputs and plans). Their columns mirror the fields of the map page.
 
 General rules for all files:
 
@@ -27,7 +18,7 @@ General rules for all files:
 - Spaces around values are ignored.
 - Yes/no columns accept `yes`, `y`, `true`, `1` or `x` as yes. Anything else, including blank, is no.
 - Card names, modifier names and vulnerability names are **case-sensitive** and must be spelled exactly as listed here.
-- A typo in a name, direction or key point stops the run with an error that names the problem.
+- A typo in a name, direction or key point stops the import with an error that names the problem.
 
 ---
 
@@ -41,8 +32,8 @@ One row per card you own.
 | `firepower` | yes | whole number | **Base** firepower at full HP, before any buffs. |
 | `survivability` | yes | whole number | Base survivability. |
 | `maneuverability` | yes | whole number | Base maneuverability. |
-| `hp` | no (default 3) | `3`, `2`, `1`, `0` | Current HP. The solver applies 100% / 90% / 80% itself. Cards at `0` are never used. |
-| `used` | no (default no) | yes / no | Card already placed this stage. Only needed when re-running mid-stage after playing one key point. |
+| `hp` | no (default 3) | `3`, `2`, `1`, `0` | Current HP, for test stages. **Import CSV** ignores it: maps track HP themselves. |
+| `used` | no (default no) | yes / no | Card already placed this stage, for test stages. **Import CSV** ignores it. |
 | `ability1_type` | no | `buff`, `debuff` | First ability. Leave all four `ability1_*` columns blank if the card has none. |
 | `ability1_target` | with type | see below | For a buff: the parameter it raises. For a debuff: the vulnerability it hits. |
 | `ability1_direction` | with type | see below | Where the ability lands. |
@@ -50,7 +41,7 @@ One row per card you own.
 | `ability2_*` | no | same as above | Second ability. |
 | `type` | no | text | Your own grouping of cards (e.g. `doddy`). Used by `Barred type` in `environment.csv`. Leave the column out of an import to keep the types already set in the web app. |
 
-**Keep base stats in the file.** When a card loses HP, change only `hp`. Do not enter the reduced numbers the game shows.
+**Enter base stats**, as the card has them at full HP, not the reduced numbers the game shows for a damaged card.
 
 **Buff targets:** `Firepower`, `Survivability`, `Maneuverability` (or `F`, `S`, `M`).
 
@@ -82,7 +73,7 @@ One row per modifier type. The solver only recommends a modifier whose `count` i
 | `value` | no | number | Points-equivalent charged each time one is used. Raise it to make the solver more reluctant to spend that modifier. |
 | `effect` | no | text | Description for your reference. Ignored by the solver. |
 
-A modifier is only used when it raises the chance of meeting the stage goal, or earns more expected points than its `value`.
+A modifier is only used when it raises the chance of meeting the stage goal or the expected number of wins. Between otherwise equal plans, the one spending fewer modifier points (by `value`) wins.
 
 | Name | Type | Default value | Effect |
 |---|---|---|---|
@@ -90,7 +81,7 @@ A modifier is only used when it raises the chance of meeting the stage goal, or 
 | `Damage Control` | grey | 12 | Survivability +20% |
 | `Dodge` | grey | 12 | Maneuverability +20% |
 | `Teamwork` | grey | 12 | This card's buffs are doubled |
-| `Effectiveness` | grey | 18 | Reward from this battle +10% |
+| `Effectiveness` | grey | 18 | Reward from this battle +10%. The solver does not rank by reward, so it never recommends this one. |
 | `Morale` | grey | 12 | A win counts as 2 toward the stage goal |
 | `Focused` | green | 15 | All parameters +40%; this card gives and receives no buffs, and its debuffs are off |
 | `Specialization` | green | 15 | This card's debuffs are doubled |
@@ -110,24 +101,26 @@ One row per enemy slot. All key points of the stage go in the same file.
 |---|---|---|---|
 | `keypoint` | no (default `1`) | text, e.g. `1`, `2`, `3` | Which key point this enemy belongs to. Must match the labels used in `environment.csv`. |
 | `slot` | yes | `1`–`4` | Position from left to right. |
-| `power` | yes | whole number | Enemy power as shown **before** you place cards. Leave blank for an empty slot; no card will be placed opposite it. |
+| `power` | yes | whole number | Enemy power as shown **before** you place cards, and before its own boost (see `boost`). Leave blank for an empty slot; no card will be placed opposite it. |
 | `vuln1` | no | vulnerability name | First vulnerability (same names as debuff targets above). |
 | `vuln2` | no | vulnerability name | Second vulnerability. Leave blank if there is only one. |
-| `reward` | no (default 0) | number | Points for defeating this enemy. For a non-point reward (e.g. a modifier), enter what it is worth to you in points, below your smallest point reward if points matter more. |
-| `must_win` | no (default no) | yes / no | The stage fails if this enemy is not defeated (e.g. a primary target). |
+| `must_win` | no (default no) | yes / no | The stage fails if this enemy is not defeated (e.g. a primary target, or one whose reward you want). |
+| `boost` | no (default 0) | whole number | The enemy's own power boost in percent, e.g. `16`. The game adds it to the same pool as your debuffs, so give the power before the boost: 108 with `boost` 16 and a 20% debuff is 108 × 96% = 104, not 125 × 80% = 100. |
+
+Older files with a `reward` column still load; the column is ignored.
 
 Example (two key points):
 
 ```
-keypoint,slot,power,vuln1,vuln2,reward,must_win
-1,1,115,AA Fire,Smoke Screen,11,no
-1,2,107,Smoke Screen,Quick Fire,12,no
-1,3,110,Detection,Air Strike,12,no
-1,4,105,Quick Fire,Air Strike,11,no
-2,1,94,Smoke Screen,Quick Fire,12,no
-2,2,114,Smoke Screen,Large Caliber,11,no
-2,3,119,Detection,Large Caliber,11,no
-2,4,120,AA Fire,Smoke Screen,1,no
+keypoint,slot,power,vuln1,vuln2,must_win,boost
+1,1,115,AA Fire,Smoke Screen,no,
+1,2,107,Smoke Screen,Quick Fire,no,
+1,3,110,Detection,Air Strike,no,
+1,4,105,Quick Fire,Air Strike,no,
+2,1,94,Smoke Screen,Quick Fire,no,
+2,2,108,Smoke Screen,Large Caliber,no,16
+2,3,119,Detection,Large Caliber,no,
+2,4,120,AA Fire,Smoke Screen,yes,
 ```
 
 ---
@@ -174,26 +167,16 @@ No modifiers,2,yes
 
 ## How the numbers are used
 
-- **Your card's parameter:** base × (100% + buffs + modifiers + conditions − 10% per lost HP), rounded to the nearest whole number (halves up). HP loss is a debuff in the same additive pool: 2 HP is −10%, 1 HP is −20%.
+- **Your card's parameter:** base × HP factor × (100% + buffs + modifiers + conditions), rounded once to the nearest whole number (halves up). The HP factor is 100% / 90% / 80% at 3 / 2 / 1 HP and scales the buffs too: Pulse (45 / 35 / 35) at 2 HP with +30% firepower and +30% survivability is 53 + 41 + 32 = 126, as the game shows.
 - **Card power:** firepower + survivability + maneuverability. The battle roll is a whole number from power − 10 to power + 10.
-- **Enemy power:** base × (100% − matching debuffs + enemy power condition), rounded to the nearest whole number.
+- **Enemy power:** base × (100% − matching debuffs + its own boost + enemy power condition), rounded to the nearest whole number.
 - **Buff and debuff strength:** each ability's % × (100% + Teamwork or Specialization 100% + buff or debuff power condition). With `Debuff power` at −50%, a 20% debuff becomes 10%, or 30% with Specialization. Unstoppable ignores these conditions for its card's own abilities.
 - **Win chance:** the share of the 21 possible rolls that are at least the enemy's power. Ties are wins.
 
 Plans are ranked by:
 1. Chance of meeting the stage goal, including any per-key-point minimums and must-win enemies.
-2. Expected reward, minus the value of modifiers spent.
-3. Expected number of wins.
+2. Expected number of wins.
+3. Fewest modifier points spent.
 4. Lowest card cost, i.e. the least power lost to HP damage.
 
-## Updating between battles
-
-| Situation | Change |
-|---|---|
-| A card fought | Lower its `hp` by 1 in `roster.csv`. |
-| Fast Repair was used | Set that card's `hp` to its value after the battle. |
-| Played one key point and re-running for the rest | Mark the placed cards `used = yes`, delete that key point's rows from `board.csv`, and lower `Wins needed` by the wins you got. |
-| New stage | Set every `used` back to `no`, replace `board.csv` and `environment.csv`. |
-| New map | Set every `hp` back to 3. |
-| Gained or spent a modifier | Change its `count` in `modifiers.csv`. |
-| Bought a card | Add a row to `roster.csv`. |
+Rewards are not part of the ranking: to make sure an enemy is beaten for its reward, mark it `must_win`.

@@ -82,14 +82,10 @@ def parse_enemies(form):
                 errors.append(f"Slot {slot}: unknown vulnerability {v!r}.")
         if vulns[0] and vulns[0] == vulns[1]:
             errors.append(f"Slot {slot}: the two vulnerabilities are the same.")
-        try:
-            reward = float(form.get(f"reward{slot}", "").strip() or 0)
-        except ValueError:
-            errors.append(f"Slot {slot}: reward must be a number.")
-            reward = 0
         enemies.append({"power": _int(form, f"power{slot}", errors, f"Slot {slot} power", 1),
-                        "vuln1": vulns[0], "vuln2": vulns[1], "reward": reward,
-                        "must_win": int(f"must_win{slot}" in form)})
+                        "vuln1": vulns[0], "vuln2": vulns[1],
+                        "must_win": int(f"must_win{slot}" in form),
+                        "boost": _int(form, f"boost{slot}", errors, f"Slot {slot} boost")})
     if not any(enemies):
         errors.append("Enter at least one enemy.")
     return enemies, errors

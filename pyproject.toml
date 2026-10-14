@@ -1,5 +1,3 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["slow: full-size solver runs; run with  pytest -m slow"]
-addopts = "-m 'not slow'"

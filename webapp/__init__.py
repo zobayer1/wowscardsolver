@@ -2,20 +2,18 @@
 
 Run with:  flask --app webapp run --debug
 
-The battle model and search live in webapp.engine, which has no web dependencies and can
-also run on its own:  python -m webapp.engine.solver
+The battle model and search live in webapp.engine, which has no web dependencies.
 """
 
 import os
 
+from flask import Flask, redirect, url_for
+
+from . import db, maps, roster
+
 
 def create_app(test_config=None):
     """Application factory."""
-    # Imported here so that running the engine alone does not load Flask or the web modules.
-    # pylint: disable=import-outside-toplevel
-    from flask import Flask, redirect, url_for
-
-    from . import db, maps, roster
 
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_mapping(

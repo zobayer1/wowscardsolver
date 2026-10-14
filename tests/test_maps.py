@@ -90,7 +90,7 @@ def test_keypoint_is_shown_with_its_conditions(stage1):
     html = stage1.get("/maps/1").text
     assert "Key point 1" in html and "Enemy power +5%" in html and "no green modifiers" in html
     assert "needs 3 wins here" in html and "more to come" in html
-    assert 'value="11.5"' in html  # the in-place editor is prefilled
+    assert 'name="power4" type="number" min="1" value="105"' in html  # editor prefilled
 
 
 def test_solving_an_incomplete_stage_caps_the_goal(stage1, solution):
@@ -276,7 +276,7 @@ def test_keypoint_editor_tabs_across_the_slots(map1):
     editor = html[html.index('id="kp-editor-new"'):]
     editor = editor[:editor.index("kp-conditions")]
     names = re.findall(r'name="(\w+)"', editor)
-    rows = ["power{}", "vuln1_{}", "vuln2_{}", "reward{}", "must_win{}"]
+    rows = ["power{}", "boost{}", "vuln1_{}", "vuln2_{}", "must_win{}"]
     assert names == [row.format(slot) for row in rows for slot in range(1, 5)]
 
 
@@ -343,3 +343,28 @@ def test_barred_type_locks_its_cards_in_the_list(map1, query):
     kgv = re.search(r'<input type="checkbox" name="barred" value="KGV"[^>]*>', stage_form).group(0)
     assert "checked" in kgv and "disabled" not in kgv
     assert f"({len(flan) + 1})" in stage_form
+
+
+def test_solution_records_how_far_the_search_got(map1, solution):
+    map1.post("/maps/1/stages/new")
+    map1.post("/maps/stage/1/keypoints/new", data=KEYPOINT_2)
+    map1.post("/maps/stage/1/solve")
+    sol = solution(1)
+    assert sol["exact"] is True and sol["options"] > 0
+    assert "searched every option" in map1.get("/maps/1").text
+
+
+def test_enemy_boost_is_saved_and_shown(map1, query):
+    map1.post("/maps/1/stages/new")
+    map1.post("/maps/stage/1/keypoints/new", data=dict(KEYPOINT_2, boost2="16"))
+    assert query("SELECT slot, boost FROM enemy ORDER BY slot") == [
+        {"slot": 1, "boost": 0}, {"slot": 2, "boost": 16}, {"slot": 4, "boost": 0}]
+    html = map1.get("/maps/1").text
+    assert '184 <span class="boost"' in html and "+16%" in html
+    assert 'name="boost2" type="number" value="16"' in html
+    with map1.application.app_context():
+        from webapp import sandbox  # pylint: disable=import-outside-toplevel
+        from webapp.db import get_db  # pylint: disable=import-outside-toplevel
+        stage = sandbox.load_stage(get_db(), 1)
+        kp = sandbox.solver_keypoint(stage, stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
+    assert kp.enemies[1].boost == 16

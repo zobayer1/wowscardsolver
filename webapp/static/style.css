@@ -476,3 +476,4 @@ button.result:hover { border-color: var(--border); background: var(--surface); }
 /* Card type */
 .tag.kind { background: #f1f5f9; color: #334155; text-transform: none; min-width: 0; font-weight: 500; }
 .checks.barred-types { align-items: center; }
+.enemy-power .boost { font-size: 14px; font-weight: 600; color: var(--danger); vertical-align: middle; }

@@ -103,8 +103,8 @@ CREATE TABLE IF NOT EXISTS enemy (
     power        INTEGER NOT NULL,
     vuln1        TEXT,
     vuln2        TEXT,
-    reward       REAL    NOT NULL DEFAULT 0,
     must_win     INTEGER NOT NULL DEFAULT 0,
+    boost        INTEGER NOT NULL DEFAULT 0,   -- the enemy's own power boost, %
     PRIMARY KEY (keypoint_id, slot)
 );
 

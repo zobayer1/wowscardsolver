@@ -41,7 +41,6 @@ def enemy_form(enemies):
         form[f"power{slot}"] = str(e.power)
         for n, v in enumerate(e.vulns, 1):
             form[f"vuln{n}_{slot}"] = v
-        form[f"reward{slot}"] = f"{e.reward:g}"
         if e.must_win:
             form[f"must_win{slot}"] = "on"
     return form
@@ -102,19 +101,18 @@ def test_ui_gives_the_solver_the_same_inputs(ui_stage, csv_stage):
         assert ui.no_mods == kp.no_mods
 
 
-@pytest.mark.slow  # solves the full stage twice (a few minutes)
 def test_ui_and_csv_give_the_same_best_plans(ui_stage, csv_stage, solution):
     roster, keypoints, min_wins, inventory = csv_stage
     # The map lists cards by name, so solve the CSV roster in that order too: equally ranked
     # plans are then broken the same way and the placements match exactly.
     by_name = sorted(roster, key=lambda c: c.name.lower())
     best, _, _ = solver.solve_stage(by_name, keypoints, min_wins, inventory,
-                                    solver.SearchLimits(top=TOP))
+                                    sandbox.SOLVE_LIMITS)   # the web app's limits (fixed trim)
     ui_stage.post("/maps/stage/1/solve")
     plans = solution(1)["plans"]
     assert len(plans) == len(best) == TOP
     for plan, (combo, st) in zip(plans, best):
-        for key in ("p_goal", "exp_reward", "spend", "exp_wins", "cost"):
+        for key in ("p_goal", "spend", "exp_wins", "cost"):
             assert plan[key] == pytest.approx(st[key]), key
         for pk, (_, slots, mods, _, _) in zip(plan["keypoints"], combo):
             assert [s["card"] for s in pk["slots"]] == [c.name if c else None for c in slots]

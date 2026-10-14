@@ -92,6 +92,11 @@
       <input name="power{{ loop.index }}" type="number" min="1" value="{{ e.power if e }}" placeholder="empty slot">
     </label>
     {% endfor %}
+    {% for e in enemies %}
+    <label class="cell" title="The enemy's own power boost, e.g. 16 for +16%. Enter the power before the boost above: the game adds the boost to the same pool as your debuffs.">Boost %
+      <input name="boost{{ loop.index }}" type="number" value="{{ e.boost if e and e.boost }}" placeholder="0">
+    </label>
+    {% endfor %}
     {% for n in (1, 2) %}
     {% for e in enemies %}
     <label class="cell">Vulnerability {{ n }}
@@ -101,12 +106,6 @@
       </select>
     </label>
     {% endfor %}
-    {% endfor %}
-    {% for e in enemies %}
-    <label class="cell">Reward
-      <input name="reward{{ loop.index }}" type="number" step="any" min="0"
-             value="{{ '%g' % e.reward if e and e.reward }}" placeholder="0">
-    </label>
     {% endfor %}
     {% for e in enemies %}
     <label class="cell bottom check"><input type="checkbox" name="must_win{{ loop.index }}"

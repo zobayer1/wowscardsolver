@@ -4,11 +4,12 @@
 import io
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from webapp import create_app
+from webapp import create_app, sandbox
 from webapp.db import get_db
 
 DATA = Path(__file__).parent / "data"
@@ -20,20 +21,27 @@ STOCK = {"Gunnery": 2, "Damage Control": 3, "Dodge": 3, "Teamwork": 0, "Effectiv
          "Morale": 0, "Focused": 3, "Specialization": 3, "Rabid": 7, "Fast Repair": 8,
          "Unstoppable": 4}
 
-# A full key point: four enemies with vulnerabilities and rewards.
+# A full key point: four enemies with vulnerabilities.
 KEYPOINT_1 = {
-    "power1": "115", "vuln1_1": "AA Fire", "vuln2_1": "Smoke Screen", "reward1": "11",
-    "power2": "107", "vuln1_2": "Smoke Screen", "vuln2_2": "Quick Fire", "reward2": "12",
-    "power3": "110", "vuln1_3": "Detection", "vuln2_3": "Air Strike", "reward3": "12",
-    "power4": "105", "vuln1_4": "Quick Fire", "vuln2_4": "Air Strike", "reward4": "11.5",
+    "power1": "115", "vuln1_1": "AA Fire", "vuln2_1": "Smoke Screen",
+    "power2": "107", "vuln1_2": "Smoke Screen", "vuln2_2": "Quick Fire",
+    "power3": "110", "vuln1_3": "Detection", "vuln2_3": "Air Strike",
+    "power4": "105", "vuln1_4": "Quick Fire", "vuln2_4": "Air Strike",
 }
 # Three enemies (slot 3 empty), one of them a must-win.
 KEYPOINT_2 = {
-    "power1": "94", "vuln1_1": "Smoke Screen", "vuln2_1": "Quick Fire", "reward1": "12",
-    "power2": "184", "vuln1_2": "Smoke Screen", "vuln2_2": "Large Caliber", "reward2": "11",
+    "power1": "94", "vuln1_1": "Smoke Screen", "vuln2_1": "Quick Fire",
+    "power2": "184", "vuln1_2": "Smoke Screen", "vuln2_2": "Large Caliber",
     "must_win2": "on", "power4": "170", "vuln1_4": "AA Fire", "vuln2_4": "Smoke Screen",
-    "reward4": "1",
 }
+
+
+@pytest.fixture(autouse=True)
+def fixed_search(monkeypatch):
+    """Solve with a fixed option trim in tests (no time budget), so results and run time do
+    not depend on the machine."""
+    monkeypatch.setattr(sandbox, "SOLVE_LIMITS",
+                        replace(sandbox.SOLVE_LIMITS, time_budget=None))
 
 
 @pytest.fixture

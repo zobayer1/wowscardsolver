@@ -91,12 +91,11 @@
               <div class="slot-title">Slot {{ slot }}
                 {% if e and e.must_win %}<span class="tag must">must win</span>{% endif %}</div>
               {% if e %}
-              <div class="enemy-power">{{ e.power }}</div>
+              <div class="enemy-power">{{ e.power }}{% if e.boost %} <span class="boost" title="Power boost, added to the same pool as your debuffs">{{ '%+d' % e.boost }}%</span>{% endif %}</div>
               <div class="enemy-vulns">
                 {% for v in [e.vuln1, e.vuln2] if v %}<span class="tag vuln">{{ v }}</span>
                 {% else %}<span class="muted small">no vulnerabilities</span>{% endfor %}
               </div>
-              <div class="muted small">Reward {{ '%g' % e.reward }}</div>
               <div class="slot-you">
                 {% if kp.played %}
                   {% if b %}
@@ -179,7 +178,9 @@
         {% set sol = st.solution %}
         {% if sol %}
         <p class="muted small">
-          Solved {{ sol.solved_at }} · compared {{ '{:,}'.format(sol.compared) }} card splits
+          Solved {{ sol.solved_at }} · scored {{ '{:,}'.format(sol.compared) }} card splits
+          {% if sol.exact %}· searched every option
+          {% elif sol.options %}· <span title="Each key point's options were trimmed to its best {{ sol.options }} before combining, to stay within the time limit. A better plan is possible but unlikely.">best {{ '{:,}'.format(sol.options) }} options per key point (time limit)</span>{% endif %}
           · goal {{ sol.goal }} wins
           {% if st.solution_stale %}<span class="warn">Inputs changed since this run. Solve again for current advice.</span>{% endif %}
         </p>
@@ -191,6 +192,7 @@
           <div class="plan">
             <div class="plan-head">
               <h4>Plan {{ loop.index }}</h4>
+              {% if plan.changed %}<span class="muted small" title="Cards assigned differently from plan 1: {{ plan.changed|join(', ') }}">alternative · {{ plan.changed|length }} cards differ from plan 1</span>{% endif %}
               {% if applicable %}
               <form method="post" action="{{ url_for('maps.apply_plan', stage_id=st.id, plan_index=plan_index) }}"
                     {% if st.solution_stale %}onsubmit="return confirm('Inputs changed since this plan was made. Apply it anyway?');"{% endif %}>
@@ -201,7 +203,6 @@
             </div>
             <div class="plan-stats">
               <span><b>{{ pct(plan.p_goal) }}</b> goal</span>
-              <span><b>{{ '%.2f' % plan.exp_reward }}</b> exp. reward</span>
               <span><b>{{ '%.2f' % plan.exp_wins }}</b> exp. wins</span>
               <span><b>{{ '%g' % plan.spend }}</b> modifier spend</span>
               <span><b>{{ '%.1f' % plan.cost }}</b> HP cost</span>
@@ -212,7 +213,7 @@
             <div class="plan-kp">
               <div class="plan-kp-head">
                 <b>Key point {{ pk.number }}</b>
-                <span class="muted">{{ '%.2f' % pk.exp_wins }} wins · reward {{ '%.2f' % pk.exp_reward }}</span>
+                <span class="muted">{{ '%.2f' % pk.exp_wins }} wins</span>
                 {% if live %}
                 <button class="button small" type="button"
                         onclick="fillPlan({{ plan_index }}, {{ pk.keypoint_id }})">Use for key point {{ pk.number }}</button>
@@ -306,7 +307,7 @@
             {% set b = kp.battles|selectattr('slot', 'equalto', loop.index)|first %}
             <tr>
               <td class="num muted">{{ loop.index }}</td>
-              <td class="num">{{ e.power if e else 'empty' }}</td>
+              <td class="num">{{ (e.power ~ (' %+d%%' % e.boost if e.boost else '')) if e else 'empty' }}</td>
               <td>{{ vulns(e) if e else '' }}</td>
               <td class="name">{{ b.card_name if b else '—' }}</td>
               <td>{{ [b.grey_mod, b.green_mod]|select|join(', ') if b }}</td>
