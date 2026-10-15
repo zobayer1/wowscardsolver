@@ -263,3 +263,17 @@ def test_first_plan_is_unchanged_by_asking_for_alternatives():
                                         solver.SearchLimits(top=2, keep=12, distinct=3))
     assert outline(plain[0][0]) == outline(distinct[0][0])
     assert len(search.changed_cards(plain[1][0], plain[0][0])) < 3   # the near-copy it replaces
+
+
+@pytest.mark.parametrize("make, seed", [(random_stage, 1), (random_stage, 4), (random_stage, 6),
+                                        (random_stage, 8), (close_stage, 0), (close_stage, 37)])
+def test_best_plan_alone_matches_the_exhaustive_search(make, seed):
+    # Asking for one plan lets the modifier search skip key points where modifiers cannot
+    # help; the best plan must not change.
+    cards, keypoints, goal, inventory = (make(seed, 7, 3) if make is close_stage
+                                         else make(seed, 8, 2))
+    fast, _, _ = solver.solve_stage(cards, keypoints, goal, inventory,
+                                    solver.SearchLimits(top=1, keep=12))
+    slow = reference_solve(cards, keypoints, goal, inventory, solver.SearchLimits(top=1, keep=12))
+    assert solver.rank_key(fast[0][1]) == solver.rank_key(slow[0][1])
+    assert outline(fast[0][0]) == outline(slow[0][0])

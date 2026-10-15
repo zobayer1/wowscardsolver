@@ -124,9 +124,8 @@ The search space grows quickly with the number of usable cards:
 | 20 | 146,001 |
 | 24 | 307,009 |
 
-Combining key points multiplies that again: 3 key points with 24 cards have over 7 million
-possible card splits. Three things keep the solve to seconds anyway, without changing which
-plans it finds:
+Combining key points multiplies that again: 3 key points with 24 cards have billions of
+possible card splits. These keep the solve to seconds, without changing which plans it finds:
 
 1. **Cheap placement scoring.** A card's win chance in a slot depends only on the card and
    what its two neighbours do to that slot, so each chance is computed once and reused, and
@@ -135,10 +134,22 @@ plans it finds:
 2. **Branch and bound.** Once 40 splits are held, a partial split is dropped when even its
    best possible completion cannot beat the weakest of them. "Best possible" combines, for
    the key points still to choose, the highest chance of each win count, the most expected
-   wins, and the lowest modifier spend and HP cost that any of their options offers. That is an upper
-   bound, so nothing that would have made the top 40 is dropped. On the example stage only
-   332,157 of the 7.1 million splits are scored.
-3. **Reused modifier results.** A key point's result with a given set of modifiers is
+   wins, and the lowest modifier spend and HP cost that any of their options offers. That is
+   an upper bound, so nothing that would have made the top 40 is dropped.
+3. **Ties are bounded tightly.** Many plans tie on goal chance and wins (for example when
+   every battle is a certain win) and differ only in HP cost. A split can only tie on wins by
+   taking a most-wins option at every remaining key point, so for ties the cost bound uses
+   the cheapest *most-wins* option, not the cheapest option overall (which would be the
+   empty one).
+4. **Stopping a scan early.** Each key point's options are sorted best first. Every 32
+   options the search checks the best that any of the remaining ones could still achieve,
+   and stops scanning that list once none of them could beat the weakest split held.
+5. **Modifiers only where they can help.** A modifier costs points, and spend ranks before
+   HP cost, so it can only improve a plan by raising the goal chance or the expected wins.
+   When a plan's goal is already certain, modifiers are only tried at key points with a
+   battle that is not yet certain. This applies when a search only needs its single best
+   plan, as in the web app; a modifier whose value is set to 0 turns it off.
+6. **Reused modifier results.** A key point's result with a given set of modifiers is
    computed once and shared by every split and variant that contains it.
 
 [`tests/test_search.py`](../tests/test_search.py) checks that the results match the plain
@@ -146,40 +157,37 @@ exhaustive search on generated stages, including close contests won with modifie
 
 ### Trimming the options, and the time budget
 
-With 3 or more key points, each key point's options are first cut to the 400 it ranks
-highest on its own (enough to keep 400³ splits). That can hide the best plan: a split that is
-best for the whole stage may use an option that looks weak for its own key point, for
-example one that leaves strong cards free for a harder key point. On 30 generated
-3-key-point stages this happened once (measured when rewards were still ranked), with a
-slightly worse plan than the true best.
+If combining every option would mean more than 400³ splits, each key point's options are
+first cut to the ones it ranks highest on its own (400 each with 3 key points, 8,000 each
+with 2). That can hide the best plan: a split that is best for the whole stage may use an
+option that looks weak for its own key point, for example one that leaves strong cards free
+for a harder key point. On 30 generated 3-key-point stages this happened once (measured with
+an earlier ranking), with a slightly worse plan than the true best.
 
-Searching everything is not affordable in general: on stages where many plans tie on win
-chance and wins, every doubling of the options multiplies the time several times over (a
-hard 24-card stage took 13 s at 400 options, 63 s at 1,000, 161 s at 2,000).
+So the web app uses a **time budget of about 20 seconds**: after the first, trimmed round,
+the search is repeated with twice as many options each time (up to all of them) while the
+next round is expected to finish within half the budget, leaving the rest for modifiers and
+the alternative plan. Each round includes everything the previous one searched, so it can
+only find better plans; a round that runs over is abandoned for the last complete one. The
+first round always completes, so a very hard stage can take somewhat longer than the budget.
 
-So the web app uses a **time budget of about 20 seconds**: after the
-first round at 400 options, the search is repeated with 800, 1,600, … options (up to all of
-them) while the next round is expected to finish within 75% of the budget, leaving the rest
-for modifiers. Each round includes everything the previous one searched, so it can only find
-better plans; a round that runs over is abandoned for the last complete one. The first round
-always completes, so a very hard stage can take somewhat longer than the budget.
-
-The map page shows how far the search got: *searched every option*, or *best N options per
-key point (time limit)*. Tests and scripts that call `solve_stage()` without a budget keep the
-fixed 400 trim, so their results never depend on the machine.
+With the bounds above, most stages reach every option well within the budget. The map page
+shows how far the search got: *searched every option*, or *best N options per key point (time
+limit)*. Tests and scripts that call `solve_stage()` without a budget keep the fixed trim, so
+their results never depend on the machine.
 
 ### Times
 
-On a desktop, for 3 key points and 24 cards:
+On a desktop, with the web app's settings (plan 1 and an alternative):
 
-| Stage | Time | Options searched per key point |
+| Stage | Time | Options searched |
 |---|---|---|
-| The example in `tests/data` | 10 s | 1,600 |
-| A hard generated close contest | 13 s | 400 |
+| Map 10, stage 1: 29 cards, 2 key points | 4 s | all (104 s and 8,000 per key point before the tie bound) |
+| The example in `tests/data`: 24 cards, 3 key points | 3 s | all |
+| A hard generated close contest: 24 cards, 3 key points | 6 s | all (13 s at 400 per key point before) |
 
-Before these changes the example took about 200 s at 400 options. With 1 or 2 key points
-nothing needs trimming, and a solve takes 2–4 s. Fewer usable cards (barred, already used,
-or at 0 HP) make every solve faster.
+The very first version of the search took about 200 s on the example at 400 options. Fewer
+usable cards (barred, already used, or at 0 HP) make every solve faster.
 
 ## Assumptions not yet confirmed in game
 

@@ -260,7 +260,10 @@ def _cannot_beat(bound, threshold):
     return bound <= threshold
 
 
-class _Level:  # pylint: disable=too-few-public-methods  # a record
+_CHECK = 32   # how often a scan of a key point's options checks whether it can stop
+
+
+class _Level:  # pylint: disable=too-few-public-methods,too-many-instance-attributes  # a record
     """One key point's options, prepared for the joint search: per option its card mask,
     win distribution (minimum applied), modifier spend, expected wins and HP cost."""
 
@@ -281,6 +284,31 @@ class _Level:  # pylint: disable=too-few-public-methods  # a record
         self.low_spend = min((it[3] for it in self.items), default=0.0)
         self.top_wins = max((it[4] for it in self.items), default=0.0)
         self.low_cost = min((it[5] for it in self.items), default=0.0)
+        # The same among the options with the most expected wins: a split that only ties on
+        # wins must use one of those here (wins move in steps of 1/21, far above rounding).
+        top = [it for it in self.items if round(it[4], 9) == round(self.top_wins, 9)]
+        self.low_spend_at_top = min((it[3] for it in top), default=0.0)
+        self.low_cost_at_top = min((it[5] for it in top), default=0.0)
+        self.suffixes = self._suffixes(width)
+
+    def _suffixes(self, width):
+        """The same bounds for the options from position j to the end, recorded at every
+        _CHECK-th j: (top tail, top wins, low spend, low cost, low spend and low cost among
+        the top-wins options)."""
+        out = {}
+        tail, wins = [0.0] * width, -1.0
+        spend = cost = spend_top = cost_top = float("inf")
+        for j in range(len(self.items) - 1, -1, -1):
+            _, _, t, s, w, c, _ = self.items[j]
+            tail = [max(a, t[k] if k < len(t) else 0.0) for k, a in enumerate(tail)]
+            spend, cost = min(spend, s), min(cost, c)
+            if round(w, 9) > round(wins, 9):
+                wins, spend_top, cost_top = w, s, c
+            elif round(w, 9) == round(wins, 9):
+                spend_top, cost_top = min(spend_top, s), min(cost_top, c)
+            if not j % _CHECK:
+                out[j] = (tail, wins, spend, cost, spend_top, cost_top)
+        return out
 
 
 def _best_splits(pools, min_wins, kp_mins, keep, deadline=None, avoid=(), min_change=0):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
@@ -299,16 +327,24 @@ def _best_splits(pools, min_wins, kp_mins, keep, deadline=None, avoid=(), min_ch
     # Suffix bounds: what levels L.. can add at most, combined.
     s_tail, s_spend, s_wins, s_cost = [None] * (n + 1), [0.0] * (n + 1), [0.0] * (n + 1), \
         [0.0] * (n + 1)
-    s_dist = [1.0]
+    s_spend_top, s_cost_top = [0.0] * (n + 1), [0.0] * (n + 1)
+    s_dists = [None] * n + [[1.0]]
     s_tail[n] = [1.0]
     for lv in range(n - 1, -1, -1):
-        top = levels[lv].top_tail
-        top_dist = [top[k] - (top[k + 1] if k + 1 < len(top) else 0.0) for k in range(len(top))]
-        s_dist = _convolve(top_dist, s_dist)
+        s_dist = s_dists[lv] = _convolve(_from_tail(levels[lv].top_tail), s_dists[lv + 1])
         s_tail[lv] = _tail(s_dist)
         s_spend[lv] = levels[lv].low_spend + s_spend[lv + 1]
         s_wins[lv] = levels[lv].top_wins + s_wins[lv + 1]
         s_cost[lv] = levels[lv].low_cost + s_cost[lv + 1]
+        s_spend_top[lv] = levels[lv].low_spend_at_top + s_spend_top[lv + 1]
+        s_cost_top[lv] = levels[lv].low_cost_at_top + s_cost_top[lv + 1]
+    # Stopping points: at option j of level lv, the best that options j.. there, together
+    # with everything at the deeper levels, could add.
+    stops = [{j: (_tail(_convolve(_from_tail(t), s_dists[lv + 1])), w + s_wins[lv + 1],
+                  s + s_spend[lv + 1], c + s_cost[lv + 1], st + s_spend_top[lv + 1],
+                  ct + s_cost_top[lv + 1])
+              for j, (t, w, s, c, st, ct) in levels[lv].suffixes.items()}
+             for lv in range(n)]
 
     best = TopK(keep)
     scored = steps = 0
@@ -317,7 +353,11 @@ def _best_splits(pools, min_wins, kp_mins, keep, deadline=None, avoid=(), min_ch
     def search(lv, used, dist, spend, wins, cost, chosen):  # chosen: [(mask, entry)]  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         nonlocal scored, steps
         last = lv == n - 1
-        for mask, d, tail, s, w, c, e in levels[lv].items:
+        for j, (mask, d, tail, s, w, c, e) in enumerate(levels[lv].items):
+            if j in stops[lv] and len(heap) >= keep and _cannot_beat(
+                    _bound(dist, spend, wins, cost, stops[lv][j], min_wins, heap[0][0]),
+                    heap[0][0]):
+                break            # no option from here on can beat the weakest split held
             if mask & used:
                 continue
             steps += 1
@@ -334,18 +374,38 @@ def _best_splits(pools, min_wins, kp_mins, keep, deadline=None, avoid=(), min_ch
                     best.push(key, [x for _, x in chosen] + [e])
                 continue
             nd = _convolve(dist, d)
-            if len(heap) >= keep:
-                bound = (round(_chance_of(nd, s_tail[lv + 1], min_wins) + 1e-12, 9),
-                         round(nw + s_wins[lv + 1] + 1e-9, 9),
-                         -round(ns + s_spend[lv + 1] - 1e-9, 9),
-                         -round(nc + s_cost[lv + 1] - 1e-9, 9))
-                if _cannot_beat(bound, heap[0][0]):
-                    continue
+            if len(heap) >= keep and _cannot_beat(
+                    _bound(nd, ns, nw, nc, (s_tail[lv + 1], s_wins[lv + 1], s_spend[lv + 1],
+                                            s_cost[lv + 1], s_spend_top[lv + 1],
+                                            s_cost_top[lv + 1]), min_wins, heap[0][0]),
+                    heap[0][0]):
+                continue
             search(lv + 1, used | mask, nd, ns, nw, nc, chosen + [(mask, e)])
 
     if n:
         search(0, 0, [1.0], 0.0, 0.0, 0.0, [])
     return best, scored
+
+
+def _from_tail(tail):
+    """The distribution whose chance of at least k wins is tail[k]."""
+    return [t - (tail[k + 1] if k + 1 < len(tail) else 0.0) for k, t in enumerate(tail)]
+
+
+def _bound(dist, spend, wins, cost, rest, min_wins, weakest):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    """Upper bound on the rank key of any completion of a partial split (its win
+    distribution, spend, wins and cost so far), given `rest` = (tail, wins, spend, cost,
+    spend and cost among top-wins options) of what the remaining choices can add. Only a
+    tie with `weakest` on goal chance and wins can still win on spend and cost, and such a
+    tie needs a most-wins option at every remaining choice."""
+    tail, more_wins, low_spend, low_cost, spend_top, cost_top = rest
+    # The 1e-12 margins cover float error (~1e-14) but stay below the 9-decimal rounding, so
+    # an exact tie is still seen as a tie.
+    top = (round(_chance_of(dist, tail, min_wins) + 1e-12, 9),
+           round(wins + more_wins + 1e-12, 9))
+    tie = top == weakest[:2]
+    return (*top, -round(spend + (spend_top if tie else low_spend) - 1e-12, 9),
+            -round(cost + (cost_top if tie else low_cost) - 1e-12, 9))
 
 
 def _mask(names, bit):
@@ -393,12 +453,12 @@ def _slot_changes(chosen, inventory):
     return changes
 
 
-def modifier_variants(combo, keypoints, inventory, max_mods):  # pylint: disable=too-many-locals
+def modifier_variants(combo, keypoints, inventory, max_mods, only=None):  # pylint: disable=too-many-locals
     """Every way to put 1..max_mods modifiers on the cards of a stage plan, skipping slot
-    types a key point blocks. Yields {key point index: per-slot modifier tuples} for the
-    key points that get modifiers."""
+    types a key point blocks (and key points not in `only`, if given). Yields {key point
+    index: per-slot modifier tuples} for the key points that get modifiers."""
     names = [n for n, q in inventory.items() if q > 0 and n not in NO_EFFECT_MODS]
-    options = [(ki, i, n) for ki, e in enumerate(combo)
+    options = [(ki, i, n) for ki, e in enumerate(combo) if only is None or ki in only
                for i, c in enumerate(e[1]) if c is not None for n in names
                if MODIFIERS[n][0] not in keypoints[ki].no_mods]
 
@@ -452,7 +512,7 @@ def _stage_key(stats, min_wins):
     return (round(goal, 9), round(wins, 9), -round(spend, 9), -round(cost, 9))
 
 
-def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins, only_best=False):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     """Phase 2: try every modifier variant (shared inventory, at most limits.max_mods on the
     whole stage) of the splits held in `top`, pushing the good ones into it. Each key
     point's result with a given set of modifiers is computed once. Returns how many
@@ -460,7 +520,10 @@ def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins):  # pyl
     entries, n = {}, 0
     for _, _, combo in list(top.heap):
         base = [_part_stats(e[4], need) for e, need in zip(combo, kp_mins)]
-        for changes in modifier_variants(combo, keypoints, inventory, limits.max_mods):
+        only = _helpful_keypoints(combo, base, min_wins) if only_best else None
+        if only is not None and not only:
+            continue
+        for changes in modifier_variants(combo, keypoints, inventory, limits.max_mods, only):
             new_combo, stats = list(combo), list(base)
             for ki, mods in changes.items():
                 key = (ki, id(combo[ki]), mods)
@@ -474,6 +537,17 @@ def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins):  # pyl
             if len(top.heap) < limits.keep or key > top.heap[0][0]:
                 top.push(key, new_combo)
     return n
+
+
+def _helpful_keypoints(combo, base, min_wins):
+    """Key points where modifiers could make this split rank higher, for when only the best
+    plan matters. Modifiers cost points and spend ranks before HP cost, so a variant only
+    beats its split by raising the goal chance or the expected wins. With the goal already
+    certain, that needs a placed battle that is not yet a certain win. Returns None (all)
+    when the goal is not certain or some modifier costs nothing."""
+    if _stage_key(base, min_wins)[0] < 1 or min(v for _, v in MODIFIERS.values()) <= 0:
+        return None
+    return {ki for ki, e in enumerate(combo) if any(r["card"] and r["p"] < 1 for r in e[3])}
 
 
 def solve_stage(roster, keypoints, min_wins=0, inventory=None, limits=None, report=None):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
@@ -498,7 +572,9 @@ def solve_stage(roster, keypoints, min_wins=0, inventory=None, limits=None, repo
     use_mods = bool(inventory) and limits.max_mods > 0
     n_total = n_plans
     if use_mods:
-        n_total += _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins)
+        # Only plan 1 comes from this search when alternatives are searched separately.
+        n_total += _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins,
+                                  only_best=limits.distinct > 0 or limits.top == 1)
 
     if limits.distinct > 0:
         # Each further plan: search the same options again, skipping splits too close to the
@@ -513,7 +589,8 @@ def solve_stage(roster, keypoints, min_wins=0, inventory=None, limits=None, repo
             if not alt.heap:
                 break
             if use_mods:
-                n_total += _add_modifiers(alt, keypoints, inventory, limits, min_wins, kp_mins)
+                n_total += _add_modifiers(alt, keypoints, inventory, limits, min_wins, kp_mins,
+                                          only_best=True)
             combos.append(alt.best(1)[0])
     else:
         combos = top.best(limits.top)

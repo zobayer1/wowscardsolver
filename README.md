@@ -94,10 +94,10 @@ Among them:
 
 ## Cautions
 
-- **Solving takes up to about 20 seconds.** 1–2 key points take a few seconds. With 3 or more,
-  the solver uses spare time, up to a budget of about 20 seconds, to search more options; the
-  map page says whether it searched every option. The page waits until the solve finishes, so
-  don't resubmit. See [how long a solve takes](./docs/SOLVER.md#how-long-a-solve-takes).
+- **Solving usually takes a few seconds.** Hard stages may use up to a budget of about
+  20 seconds; if the search had to stop before trying every option, the map page says so. The
+  page waits until the solve finishes, so don't resubmit. See
+  [how long a solve takes](./docs/SOLVER.md#how-long-a-solve-takes).
 - **Local and single-user.** The app runs on Flask's development server with no login and a
   built-in development secret key. Keep it on your own machine. To change the key, put
   `SECRET_KEY = "..."` in `instance/config.py`.
