@@ -181,6 +181,7 @@
           Solved {{ sol.solved_at }} · scored {{ '{:,}'.format(sol.compared) }} card splits
           {% if sol.exact %}· searched every option
           {% elif sol.options %}· <span title="Each key point's options were trimmed to its best {{ sol.options }} before combining, to stay within the time limit. A better plan is possible but unlikely.">best {{ '{:,}'.format(sol.options) }} options per key point (time limit)</span>{% endif %}
+          {% if sol.candidates and sol.modified < sol.candidates %}· <span title="Modifiers were tried on the best {{ sol.modified }} card splits before the time limit.">modifiers tried on the best {{ '{:,}'.format(sol.modified) }} of {{ '{:,}'.format(sol.candidates) }} splits</span>{% endif %}
           · goal {{ sol.goal }} wins
           {% if st.solution_stale %}<span class="warn">Inputs changed since this run. Solve again for current advice.</span>{% endif %}
         </p>

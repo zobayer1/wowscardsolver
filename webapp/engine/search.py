@@ -453,14 +453,16 @@ def _slot_changes(chosen, inventory):
     return changes
 
 
-def modifier_variants(combo, keypoints, inventory, max_mods, only=None):  # pylint: disable=too-many-locals
+def modifier_variants(combo, keypoints, inventory, max_mods, allowed=None):  # pylint: disable=too-many-locals
     """Every way to put 1..max_mods modifiers on the cards of a stage plan, skipping slot
-    types a key point blocks (and key points not in `only`, if given). Yields {key point
-    index: per-slot modifier tuples} for the key points that get modifiers."""
+    types a key point blocks (and, if given, (key point, slot, modifier) choices not in
+    `allowed`). Yields {key point index: per-slot modifier tuples} for the key points
+    that get modifiers."""
     names = [n for n, q in inventory.items() if q > 0 and n not in NO_EFFECT_MODS]
-    options = [(ki, i, n) for ki, e in enumerate(combo) if only is None or ki in only
+    options = [(ki, i, n) for ki, e in enumerate(combo)
                for i, c in enumerate(e[1]) if c is not None for n in names
-               if MODIFIERS[n][0] not in keypoints[ki].no_mods]
+               if MODIFIERS[n][0] not in keypoints[ki].no_mods
+               and (allowed is None or (ki, i, n) in allowed)]
 
     def slots_of(changes):
         return {ki: tuple(tuple(slots.get(i, ())) for i in range(4))
@@ -512,18 +514,25 @@ def _stage_key(stats, min_wins):
     return (round(goal, 9), round(wins, 9), -round(spend, 9), -round(cost, 9))
 
 
-def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins, only_best=False):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins, only_best=False,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+                   deadline=None):
     """Phase 2: try every modifier variant (shared inventory, at most limits.max_mods on the
     whole stage) of the splits held in `top`, pushing the good ones into it. Each key
-    point's result with a given set of modifiers is computed once. Returns how many
-    variants were scored."""
-    entries, n = {}, 0
-    for _, _, combo in list(top.heap):
+    point's result with a given set of modifiers is computed once. With a `deadline`, the
+    splits are taken best first and the search stops when time.perf_counter() passes it.
+    Returns (variants scored, splits whose modifier search was completed)."""
+    entries, n, done = {}, 0, 0
+    splits = sorted(top.heap, reverse=True) if deadline is not None else list(top.heap)
+    for _, _, combo in splits:
+        if deadline is not None and time.perf_counter() > deadline:
+            break
+        done += 1
         base = [_part_stats(e[4], need) for e, need in zip(combo, kp_mins)]
-        only = _helpful_keypoints(combo, base, min_wins) if only_best else None
-        if only is not None and not only:
+        allowed = _useful_modifiers(combo, keypoints, base, min_wins) if only_best else None
+        if allowed is not None and not allowed:
             continue
-        for changes in modifier_variants(combo, keypoints, inventory, limits.max_mods, only):
+        for changes in modifier_variants(combo, keypoints, inventory, limits.max_mods,
+                                         allowed):
             new_combo, stats = list(combo), list(base)
             for ki, mods in changes.items():
                 key = (ki, id(combo[ki]), mods)
@@ -536,18 +545,65 @@ def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins, only_be
             key = _stage_key(stats, min_wins)
             if len(top.heap) < limits.keep or key > top.heap[0][0]:
                 top.push(key, new_combo)
-    return n
+    return n, done
 
 
-def _helpful_keypoints(combo, base, min_wins):
-    """Key points where modifiers could make this split rank higher, for when only the best
-    plan matters. Modifiers cost points and spend ranks before HP cost, so a variant only
-    beats its split by raising the goal chance or the expected wins. With the goal already
-    certain, that needs a placed battle that is not yet a certain win. Returns None (all)
-    when the goal is not certain or some modifier costs nothing."""
-    if _stage_key(base, min_wins)[0] < 1 or min(v for _, v in MODIFIERS.values()) <= 0:
+# What each modifier can change: the card's own battle, the battles its buffs or debuffs
+# reach, or (Morale) only the goal.
+_OWN_MODS = frozenset({"Gunnery", "Damage Control", "Dodge", "Focused", "Fast Repair"})
+
+
+def _useful_modifiers(combo, keypoints, base, min_wins):
+    """The (key point, slot, modifier) choices that could make this split rank higher, for
+    when only the best plan matters. Modifiers cost points and spend ranks before HP cost,
+    so a variant only beats its split by raising the goal chance or the expected wins,
+    which needs some battle it can reach to be less than certain:
+      Gunnery, Damage Control, Dodge, Focused: the card's own battle (Fast Repair: also only
+        if the card is damaged);
+      Teamwork: a neighbour the card buffs; Specialization: an enemy its debuffs hit;
+        Rabid: an enemy its debuffs miss for lack of the vulnerability;
+      Unstoppable: its own battle under a parameter condition, or what its buffs / debuffs
+        reach under a buff / debuff power condition;
+      Morale: any won-able battle, while the goal is not certain.
+    Returns None (everything) if some modifier costs nothing."""
+    if min(v for _, v in MODIFIERS.values()) <= 0:
         return None
-    return {ki for ki, e in enumerate(combo) if any(r["card"] and r["p"] < 1 for r in e[3])}
+    goal_open = _stage_key(base, min_wins)[0] < 1
+    allowed = set()
+    for ki, (e, kp) in enumerate(zip(combo, keypoints)):
+        open_ = [r["card"] is not None and r["p"] < 1 for r in e[3]]
+        for i, c in enumerate(e[1]):
+            if c is not None:
+                morale = goal_open and e[3][i]["p"] > 0
+                allowed.update((ki, i, name) for name in _useful_on(c, i, kp, open_, morale))
+    return allowed
+
+
+def _useful_on(c, i, kp, open_, morale):
+    """Modifiers that could raise a battle's chance when put on card c in slot i of key
+    point kp, given which slots hold a battle that is not yet certain (open_)."""
+    buffs = [i + BUFF_OFFSET[a.dir] for a in c.abilities
+             if a.kind == "buff" and 0 <= i + BUFF_OFFSET[a.dir] < 4]
+    hits, misses = [], []
+    for a in c.abilities:
+        j = i + DEBUFF_OFFSET[a.dir] if a.kind == "debuff" else -1
+        if 0 <= j < 4 and kp.enemies[j] is not None:
+            (hits if a.target in kp.enemies[j].vulns else misses).append(j)
+    reach = {
+        "Teamwork": any(open_[j] for j in buffs),
+        "Specialization": any(open_[j] for j in hits),
+        "Rabid": any(open_[j] for j in misses),
+        "Morale": morale,
+        "Unstoppable": bool((open_[i] and any(kp.cond.get(p) for p in PARAMS))
+                            or (kp.cond.get("B") and any(open_[j] for j in buffs))
+                            or (kp.cond.get("D") and any(open_[j] for j in hits))),
+    }
+    for name in MODIFIERS:
+        if name in _OWN_MODS:
+            if open_[i] and (name != "Fast Repair" or c.hp < 3):
+                yield name
+        elif reach.get(name):
+            yield name
 
 
 def solve_stage(roster, keypoints, min_wins=0, inventory=None, limits=None, report=None):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
@@ -556,9 +612,19 @@ def solve_stage(roster, keypoints, min_wins=0, inventory=None, limits=None, repo
     plans scored including modifier variants). With limits.distinct, plans after the first
     are the best that change at least that many card assignments from every earlier plan.
     If `report` is a dict, it receives how far the search got: "options" (entries kept per
-    key point), "exact" (nothing trimmed) and "rounds"."""
+    key point), "exact" (nothing trimmed), "rounds", and for plan 1's modifier search
+    "modified" (splits searched) and "candidates" (splits held).
+    With a time budget, widening the trim may use the first 20% of it (40% without
+    alternatives), plan 1's modifier search runs to 50% (95%), and the alternative plans'
+    searches to 95%."""
     limits = limits or SearchLimits()
     start = time.perf_counter()
+    budget = limits.time_budget
+    alternatives = limits.distinct > 0 and limits.top > 1
+
+    def by(share):
+        return None if budget is None else start + share * budget
+
     avail = [c for c in roster if c.hp > 0 and not c.used]
     kp_mins = [kp.min_wins for kp in keypoints]
 
@@ -567,14 +633,18 @@ def solve_stage(roster, keypoints, min_wins=0, inventory=None, limits=None, repo
     for kp in keypoints:
         cards = [c for c in avail if c.name not in kp.barred]
         keyed.append((cards, _subset_keys(cards, kp.enemies, kp.cond)))
-    top, n_plans, cap, rounds, pools = _widening_search(keyed, keypoints, min_wins, kp_mins,
-                                                        limits, start)
+    top, n_plans, cap, rounds, pools = _widening_search(
+        keyed, keypoints, min_wins, kp_mins, limits, by(0.2 if alternatives else 0.4))
     use_mods = bool(inventory) and limits.max_mods > 0
     n_total = n_plans
+    candidates, modified = len(top.heap), 0
     if use_mods:
         # Only plan 1 comes from this search when alternatives are searched separately.
-        n_total += _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins,
-                                  only_best=limits.distinct > 0 or limits.top == 1)
+        variants, modified = _add_modifiers(
+            top, keypoints, inventory, limits, min_wins, kp_mins,
+            only_best=limits.distinct > 0 or limits.top == 1,
+            deadline=by(0.5 if alternatives else 0.95))
+        n_total += variants
 
     if limits.distinct > 0:
         # Each further plan: search the same options again, skipping splits too close to the
@@ -590,33 +660,30 @@ def solve_stage(roster, keypoints, min_wins=0, inventory=None, limits=None, repo
                 break
             if use_mods:
                 n_total += _add_modifiers(alt, keypoints, inventory, limits, min_wins, kp_mins,
-                                          only_best=True)
+                                          only_best=True, deadline=by(0.95))[0]
             combos.append(alt.best(1)[0])
     else:
         combos = top.best(limits.top)
 
     if report is not None:
         report.update(options=cap, rounds=rounds,
-                      exact=cap >= max((len(k) for _, k in keyed), default=0))
+                      exact=cap >= max((len(k) for _, k in keyed), default=0),
+                      modified=modified, candidates=candidates)
     best = []
     for combo in combos:
         best.append((combo, stage_summary([e[4] for e in combo], min_wins, kp_mins)))
     return best, n_plans, n_total
 
 
-def _widening_search(keyed, keypoints, min_wins, kp_mins, limits, start):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def _widening_search(keyed, keypoints, min_wins, kp_mins, limits, deadline):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     """Best splits over the key points' options, first trimmed to fit limits.max_combos.
-    With a time budget, the trim is then widened round by round while the next round is
-    expected to finish by 75% of the budget (50% when distinct alternatives will be searched
-    too; the rest is left for modifiers and those searches); a round that overruns anyway is
-    abandoned for the previous one. Each round searches a superset of the last, so it can
-    only find better splits.
+    With a `deadline` (from the time budget), the trim is then widened round by round while
+    the next round is expected to finish by it; a round that overruns anyway is abandoned
+    for the previous one. Each round searches a superset of the last, so it can only find
+    better splits.
     Returns (TopK, splits scored, entries kept per key point, rounds completed, the final
     round's pools)."""
-    budget = limits.time_budget
-    share = 0.5 if limits.distinct > 0 and limits.top > 1 else 0.75
-    deadline = None if budget is None else start + share * budget
-    caps = _caps([len(k) for _, k in keyed], limits.max_combos, widen=budget is not None)
+    caps = _caps([len(k) for _, k in keyed], limits.max_combos, widen=deadline is not None)
     pools = [[] for _ in keyed]
     result, times = None, []
     for cap in caps:

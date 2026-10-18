@@ -209,8 +209,9 @@ def test_time_budget_widens_to_the_exact_search():
     assert report["exact"] and report["rounds"] > 1
     exact = reference_solve(cards, keypoints, goal, inventory,
                             solver.replace(start, max_combos=10 ** 12))
+    # With a budget the modifier search takes splits best first, which can break exact ties
+    # differently, so compare quality rather than which of the tied plans is listed.
     assert [solver.rank_key(st) for _, st in fast] == [solver.rank_key(st) for _, st in exact]
-    assert [outline(c) for c, _ in fast] == [outline(c) for c, _ in exact]
 
 
 def test_tiny_time_budget_keeps_the_first_round():
@@ -219,7 +220,8 @@ def test_tiny_time_budget_keeps_the_first_round():
     report = {}
     rushed, _, _ = solver.solve_stage(cards, keypoints, goal, inventory,
                                       solver.replace(fixed, time_budget=1e-6), report=report)
-    assert report == {"options": 60, "rounds": 1, "exact": False}
+    assert {k: report[k] for k in ("options", "rounds", "exact")} == {
+        "options": 60, "rounds": 1, "exact": False}
     plain, _, _ = solver.solve_stage(cards, keypoints, goal, inventory, fixed)
     assert [outline(c) for c, _ in rushed] == [outline(c) for c, _ in plain]
 
@@ -277,3 +279,16 @@ def test_best_plan_alone_matches_the_exhaustive_search(make, seed):
     slow = reference_solve(cards, keypoints, goal, inventory, solver.SearchLimits(top=1, keep=12))
     assert solver.rank_key(fast[0][1]) == solver.rank_key(slow[0][1])
     assert outline(fast[0][0]) == outline(slow[0][0])
+
+
+@pytest.mark.parametrize("seed, cond", [(0, {"B": -100}), (24, {"D": -50}), (37, {"F": -12}),
+                                        (45, {"B": -100, "S": -12}), (49, {"D": -50})])
+def test_useful_modifier_filter_keeps_the_best_plan_under_conditions(seed, cond):
+    # The web app only tries modifiers that could raise some battle's chance (including
+    # Unstoppable and Teamwork against conditions); the best plan must match trying them all.
+    cards, keypoints, goal, inventory = close_stage(seed, 7, 3)
+    keypoints[1] = solver.replace(keypoints[1], cond=cond)
+    limits = solver.SearchLimits(top=1, keep=12)
+    fast, _, _ = solver.solve_stage(cards, keypoints, goal, inventory, limits)
+    slow = reference_solve(cards, keypoints, goal, inventory, limits)
+    assert solver.rank_key(fast[0][1]) == solver.rank_key(slow[0][1])

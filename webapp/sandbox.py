@@ -22,7 +22,8 @@ COND_KEYS = dict(zip(ENV_FIELDS, ("F", "S", "M", "E", "B", "D")))
 MAX_KEYPOINTS = 5
 # Two plans; the option trim widens while a solve stays within about 20 seconds.
 # Plan 2 must change at least 3 card assignments from plan 1, to be a real alternative.
-SOLVE_LIMITS = solver.SearchLimits(top=2, time_budget=20, distinct=3)
+# Up to 5,000 of the best card splits get the modifier search, as time allows.
+SOLVE_LIMITS = solver.SearchLimits(top=2, time_budget=20, distinct=3, keep=5000)
 GREY_MODS = [n for n, (kind, _) in solver.MODIFIERS.items() if kind == "grey"]
 GREEN_MODS = [n for n, (kind, _) in solver.MODIFIERS.items() if kind == "green"]
 
@@ -488,6 +489,7 @@ def solve(db, stage):
     ids = {c["name"]: c["id"] for c in cards}
     solution = {"goal": goal, "complete": stage["complete"], "compared": n_plans,
                 "variants": n_total, "options": search["options"], "exact": search["exact"],
+                "modified": search["modified"], "candidates": search["candidates"],
                 "solved_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "plans": [_plan_json(combo, st, open_kps, ids, best[0][0] if i else None)
                           for i, (combo, st) in enumerate(best)]}

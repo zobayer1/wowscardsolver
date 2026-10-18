@@ -42,16 +42,16 @@ flowchart TD
         T -- yes --> T2["Keep only the best 400 entries of each pool<br/>(widened while time allows, see below)"]
         T -- no --> X
         T2 --> X["Combine one option from every pool,<br/>never using a card twice"]
-        X --> BB{"Could this partial split still<br/>beat the 40th best so far?"}
+        X --> BB{"Could this partial split still<br/>beat the weakest one held?"}
         BB -- "no: skip it and everything under it" --> X
         BB -- yes --> Y["Score the whole stage:<br/>chance of meeting the stage goal<br/>and every per-key-point minimum"]
-        Y --> Z["Keep the 40 best card splits"]
+        Y --> Z["Keep the best card splits<br/>(5,000 in the web app, 40 by default)"]
     end
 
     Z --> M1
 
     subgraph P2 ["Phase 2: modifiers"]
-        M1["For each of the 40 splits:<br/>try every way to add 1–2 modifiers<br/>(one grey + one green per card,<br/>within stock, not in blocked slots)"]
+        M1["For each kept split, best first while time allows:<br/>try every useful way to add 1–2 modifiers<br/>(one grey + one green per card,<br/>within stock, not in blocked slots)"]
         M1 --> M2["Re-score only the key points that changed<br/>(each key point + modifier set computed once)"]
     end
 
@@ -144,12 +144,24 @@ possible card splits. These keep the solve to seconds, without changing which pl
 4. **Stopping a scan early.** Each key point's options are sorted best first. Every 32
    options the search checks the best that any of the remaining ones could still achieve,
    and stops scanning that list once none of them could beat the weakest split held.
-5. **Modifiers only where they can help.** A modifier costs points, and spend ranks before
-   HP cost, so it can only improve a plan by raising the goal chance or the expected wins.
-   When a plan's goal is already certain, modifiers are only tried at key points with a
-   battle that is not yet certain. This applies when a search only needs its single best
-   plan, as in the web app; a modifier whose value is set to 0 turns it off.
-6. **Reused modifier results.** A key point's result with a given set of modifiers is
+5. **Only useful modifiers.** A modifier costs points, and spend ranks before HP cost, so
+   it can only improve a plan by raising the goal chance or the expected wins, which means
+   raising the chance of some battle that is not yet certain. Each modifier can only reach
+   certain battles: Gunnery, Damage Control, Dodge and Focused its own card's (Fast Repair
+   too, if the card is damaged); Teamwork the neighbours its card buffs; Specialization the
+   enemies its card's debuffs hit, Rabid those they miss; Unstoppable whatever the key
+   point's conditions weaken (so it, and Teamwork against a "Buff power −100%" condition,
+   are tried exactly where they matter); Morale the goal, while it is not certain. A
+   modifier whose reachable battles are all certain wins is not tried. This applies when a
+   search only needs its single best plan, as in the web app; a modifier whose value is set
+   to 0 turns it off.
+6. **Many splits get modifiers.** Modifiers are tried on the best splits found without
+   them, and a split that is mediocre without modifiers can be the best with them. The web
+   app keeps up to 5,000 splits for this (instead of 40) and works through them best first
+   while the time budget allows; the map page says if it had to stop early. On a hard stage
+   with a −100% buff power key point this found 11.95 expected wins at HP cost 198, where 40
+   splits gave 11 wins at HP cost 269.5.
+7. **Reused modifier results.** A key point's result with a given set of modifiers is
    computed once and shared by every split and variant that contains it.
 
 [`tests/test_search.py`](../tests/test_search.py) checks that the results match the plain
@@ -166,8 +178,8 @@ an earlier ranking), with a slightly worse plan than the true best.
 
 So the web app uses a **time budget of about 20 seconds**: after the first, trimmed round,
 the search is repeated with twice as many options each time (up to all of them) while the
-next round is expected to finish within half the budget, leaving the rest for modifiers and
-the alternative plan. Each round includes everything the previous one searched, so it can
+next round is expected to finish within the first 20% of the budget. Plan 1's modifier
+search then runs until 50% of it, and the alternative plan's search until 95%. Each round includes everything the previous one searched, so it can
 only find better plans; a round that runs over is abandoned for the last complete one. The
 first round always completes, so a very hard stage can take somewhat longer than the budget.
 
