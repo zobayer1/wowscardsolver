@@ -338,3 +338,11 @@ def test_new_stage_opens_the_form_for_key_point_1(map1):
     assert '<div class="add-kp" id="add-kp" >' in html
     assert '<h3 class="editor-title" hidden>Key point 2</h3>' in html
     assert re.search(r'id="kp-editor-new"\s+data-view="add-kp"\s+hidden>', html)
+
+
+def test_finishing_a_stage_shows_the_start_panel(stage1):
+    r = stage1.post("/maps/stage/1/finish")
+    assert r.headers["Location"].endswith("/maps/1#current-stage")
+    html = stage1.get("/maps/1").text
+    start = html.index('id="current-stage"')
+    assert "Start a New Stage" in html[start:start + 400]

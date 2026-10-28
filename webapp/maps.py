@@ -201,7 +201,7 @@ def new_stage(map_id):
     return _to_map(map_id, "current-stage")
 
 
-def _stage_action(stage_id, action, message):
+def _stage_action(stage_id, action, message, anchor=None):
     stage = _get_stage(stage_id)
     try:
         action(get_db(), stage)
@@ -209,7 +209,7 @@ def _stage_action(stage_id, action, message):
             flash(message.format(n=stage["number"]))
     except sandbox.SandboxError as e:
         flash(str(e), "error")
-    return _to_map(stage, f"stage-{stage['number']}")
+    return _to_map(stage, anchor or f"stage-{stage['number']}")
 
 
 @bp.route("/stage/<int:stage_id>/solve", methods=("POST",))
@@ -220,12 +220,12 @@ def solve(stage_id):
 
 @bp.route("/stage/<int:stage_id>/apply/<int:plan_index>", methods=("POST",))
 def apply_plan(stage_id, plan_index):
-    """Record a whole solver plan: HP, used flags and modifiers update at once."""
+    """Record a whole solver plan: HP and used flags update at once."""
     stage = _get_stage(stage_id)
     try:
         numbers = sandbox.apply_plan(get_db(), stage, plan_index)
         flash(f"Applied plan {plan_index + 1} to key point{'s' if len(numbers) > 1 else ''} "
-              f"{', '.join(map(str, numbers))}. HP, used cards and modifiers updated. "
+              f"{', '.join(map(str, numbers))}. HP and used cards updated. "
               f"Click a slot's result to correct a win or loss.")
     except sandbox.SandboxError as e:
         flash(str(e), "error")
@@ -234,8 +234,9 @@ def apply_plan(stage_id, plan_index):
 
 @bp.route("/stage/<int:stage_id>/finish", methods=("POST",))
 def finish_stage(stage_id):
-    """Close the stage."""
-    return _stage_action(stage_id, sandbox.finish_stage, "Stage {n} finished.")
+    """Close the stage, then show the Start a New Stage panel (where the stage was)."""
+    return _stage_action(stage_id, sandbox.finish_stage, "Stage {n} finished.",
+                         anchor="current-stage")
 
 
 @bp.route("/stage/<int:stage_id>/reopen", methods=("POST",))
