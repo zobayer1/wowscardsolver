@@ -128,15 +128,17 @@
       {% endfor %}
 
       {% if st.keypoints|length < max_keypoints %}
-      {% set adding = draft and draft.kp_id is none %}
+      {% set redo = draft and draft.kp_id is none %}
+      {# A new stage opens straight on the form for key point 1. #}
+      {% set adding = redo or not st.keypoints %}
       <div class="kp new-kp">
         <div class="add-kp" id="add-kp" {{ 'hidden' if adding }}>
           <button class="button" type="button" onclick="toggleEditor('kp-editor-new')">Add key point {{ st.keypoints|length + 1 }}</button>
           {% if not st.keypoints %}<span class="hint">A stage has 1–{{ max_keypoints }} key points; add them as they appear.</span>{% endif %}
         </div>
-        {% if adding %}<h3>Key point {{ st.keypoints|length + 1 }}</h3>{% endif %}
+        <h3 class="editor-title" {{ '' if adding else 'hidden' }}>Key point {{ st.keypoints|length + 1 }}</h3>
         {{ keypoint_editor(url_for('maps.new_keypoint', stage_id=st.id),
-                           draft.kp if adding else {}, cards, env_labels, vuln_names,
+                           draft.kp if redo else {}, cards, env_labels, vuln_names,
                            'kp-editor-new', 'add-kp', adding) }}
       </div>
       {% endif %}
@@ -344,6 +346,8 @@
     editor.hidden = !editor.hidden;
     const view = document.getElementById(editor.dataset.view);
     if (view) view.hidden = !editor.hidden;
+    const title = editor.previousElementSibling;   // a new key point's heading, if any
+    if (title && title.classList.contains("editor-title")) title.hidden = editor.hidden;
     if (!editor.hidden) editor.querySelector("input").focus();
   }
 </script>

@@ -281,6 +281,8 @@ details.barred summary { cursor: pointer; color: var(--muted); }
 .kp-head .muted { font-size: 13px; }
 .kp .form-actions { align-items: center; margin-top: 10px; }
 .kp .form-actions .hint { margin: 0; }
+/* Elements styled with a display value must still hide when hidden. */
+[hidden] { display: none !important; }
 .add-kp { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .add-kp .hint { margin: 0; }
 

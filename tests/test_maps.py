@@ -326,3 +326,15 @@ def test_enemy_boost_is_saved_and_shown(map1, query):
         kp = sandbox.solver_keypoint(stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
     assert kp.enemies[1].boost == 16
 
+
+def test_new_stage_opens_the_form_for_key_point_1(map1):
+    map1.post("/maps/1/stages/new")
+    html = map1.get("/maps/1").text
+    assert '<div class="add-kp" id="add-kp" hidden>' in html
+    assert '<h3 class="editor-title" >Key point 1</h3>' in html
+    assert re.search(r'id="kp-editor-new"\s+data-view="add-kp"\s+>', html)
+    map1.post("/maps/stage/1/keypoints/new", data=KEYPOINT_1)
+    html = map1.get("/maps/1").text           # later key points wait for the button
+    assert '<div class="add-kp" id="add-kp" >' in html
+    assert '<h3 class="editor-title" hidden>Key point 2</h3>' in html
+    assert re.search(r'id="kp-editor-new"\s+data-view="add-kp"\s+hidden>', html)

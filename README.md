@@ -70,7 +70,7 @@ flask --app webapp import-roster path/to/roster.csv
 1. **Roster:** import or enter your cards.
 2. **New map** (top right) opens the map in a new tab with every card at 3 HP.
 3. **Start a New Stage** and add the key points as they appear, each with its enemies,
-   conditions and the wins it needs (if any).
+   conditions and the wins it needs (if any). The form for key point 1 opens with the stage.
    **If you cannot buy or use modifiers at a key point, tick No grey / No green modifiers
    there.** The solver then gets the best win chances from cards alone, and you can try the
    modifiers you do have by hand.
