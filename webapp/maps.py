@@ -1,6 +1,6 @@
 """Map pages: start a map, then add stages and key points, solve, and record battles."""
 
-from flask import (Blueprint, abort, flash, jsonify, redirect, render_template, request,
+from flask import (Blueprint, abort, flash, redirect, render_template, request,
                    url_for)
 
 from . import sandbox
@@ -159,11 +159,9 @@ def _render_map(map_id, draft=None):
     current = stages[-1] if stages and not stages[-1]["finished"] else None
     return render_template(
         "maps/map.html", map=m, cards=sandbox.map_cards(db, map_id), stages=stages,
-        current=current, draft=draft, stock=sandbox.modifier_stock(db),
-        modifiers=sandbox.modifier_counts(db),
-        grey_mods=sandbox.GREY_MODS, green_mods=sandbox.GREEN_MODS, vuln_names=solver.VULNS,
-        env_labels=ENV_LABELS, describe=describe_ability,
-        max_keypoints=sandbox.MAX_KEYPOINTS)
+        current=current, draft=draft, grey_mods=sandbox.GREY_MODS,
+        green_mods=sandbox.GREEN_MODS, vuln_names=solver.VULNS, env_labels=ENV_LABELS,
+        describe=describe_ability, max_keypoints=sandbox.MAX_KEYPOINTS)
 
 
 @bp.route("/<int:map_id>/cards", methods=("POST",))
@@ -189,41 +187,6 @@ def sync_roster(map_id):
             ([f"Updated the type of {', '.join(retyped)}."] if retyped else [])
     flash(" ".join(parts) or "The map is up to date with the roster.")
     return _to_map(map_id, "cards")
-
-
-def _local_next(default):
-    """The form's `next` page if it is a path on this site, else `default`."""
-    target = request.form.get("next", "")
-    return target if target.startswith("/") and not target.startswith("//") else default
-
-
-@bp.route("/modifiers", methods=("POST",))
-def set_modifiers():
-    """Save the shared modifier stock, unless it changed since the page was loaded; then go
-    back to the page the form was on."""
-    errors = []
-    counts = {n: _int(request.form, f"mod_{n}", errors, n, minimum=0) for n in solver.MODIFIERS}
-    versions = {}
-    for n in solver.MODIFIERS:
-        try:
-            versions[n] = int(request.form.get(f"ver_{n}", ""))
-        except ValueError:
-            versions[n] = None
-    if not errors:
-        try:
-            changed = sandbox.set_modifier_counts(get_db(), counts, versions)
-            flash(f"Modifier stock saved: {', '.join(f'{n} {c}' for n, c in changed.items())}."
-                  if changed else "Modifier stock unchanged.")
-        except sandbox.SandboxError as e:
-            errors.append(str(e))
-    _flash_errors(errors)
-    return redirect(_local_next(url_for("roster.index") + "#modifiers"))
-
-
-@bp.route("/modifiers.json")
-def modifiers_json():
-    """The shared modifier stock with versions, for the Reload counts button."""
-    return jsonify(sandbox.modifier_stock(get_db()))
 
 
 # ---------------------------------------------------------------- stages
@@ -338,7 +301,7 @@ def record(keypoint_id):
     kp = next(k for k in stage["keypoints"] if k["id"] == keypoint_id)
     try:
         sandbox.record_battle(get_db(), stage, keypoint_id, parse_battle(request.form, kp))
-        flash(f"Recorded key point {kp['number']}. Card HP and modifier stock updated.")
+        flash(f"Recorded key point {kp['number']}. Card HP updated.")
     except sandbox.SandboxError as e:
         flash(str(e), "error")
     return _to_map(stage, f"kp-{keypoint_id}")
@@ -361,7 +324,7 @@ def undo(keypoint_id):
     stage = _stage_of_keypoint(keypoint_id)
     try:
         sandbox.undo_battle(get_db(), stage, keypoint_id)
-        flash("Battle undone. Card HP and modifier stock restored.")
+        flash("Battle undone. Card HP restored.")
     except sandbox.SandboxError as e:
         flash(str(e), "error")
     return _to_map(stage, f"kp-{keypoint_id}")

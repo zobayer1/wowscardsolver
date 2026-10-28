@@ -7,7 +7,8 @@
 | `board.csv` | Enemy cards at each key point of a stage | the example stage in `tests/data` |
 | `environment.csv` | Required wins, battle conditions and restrictions | the example stage in `tests/data` |
 
-In the web app you enter stages, key points and modifier counts on the map page; only the
+In the web app you enter stages and key points on the map page, and modifiers are not
+counted (any can be bought; see [SOLVER.md](./SOLVER.md)); only the
 roster is exchanged as a CSV file. The other three files describe a complete stage for the
 tests (`tests/test_csv_compat.py` checks that entering it through the web app gives the solver
 the same inputs and plans). Their columns mirror the fields of the map page.
@@ -89,7 +90,7 @@ A modifier is only used when it raises the chance of meeting the requirements (m
 | `Fast Repair` | green | 15 | +2 HP (max 3) before the battle |
 | `Unstoppable` | green | 15 | Battle conditions on parameters, buffs and debuffs are ignored for this card. Card bans, modifier bans and HP loss still apply. |
 
-Each card can carry one grey and one green modifier. By default the solver uses at most 2 modifiers per stage.
+Each card can carry one grey and one green modifier. With these CSV files the solver uses at most 2 modifiers per stage (its `SearchLimits` default); the web app has no such limit and does not count modifiers.
 
 ---
 

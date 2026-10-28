@@ -122,14 +122,7 @@ def test_form_sets_and_clears_type(client, query):
     assert query("SELECT type FROM card")[0]["type"] == ""
 
 
-def test_roster_page_has_the_modifier_panel(loaded, query):
-    html = loaded.get("/roster/").text
-    assert 'id="stock-form"' in html and 'name="next" value="/roster/#modifiers"' in html
-    stock = loaded.get("/maps/modifiers.json").get_json()
-    data = {f"ver_{n}": str(s["version"]) for n, s in stock.items()}
-    data.update({f"mod_{n}": str(s["count"]) for n, s in stock.items()})
-    r = loaded.post("/maps/modifiers", data=dict(data, mod_Rabid="5", next="/roster/#modifiers"))
-    assert r.headers["Location"] == "/roster/#modifiers"
-    assert query("SELECT count FROM modifier WHERE name = 'Rabid'")[0]["count"] == 5
-    r = loaded.post("/maps/modifiers", data=dict(data, next="https://example.com/"))
-    assert r.headers["Location"] == "/roster/#modifiers"  # only local pages
+def test_modifiers_are_not_counted(loaded):
+    assert "Modifiers" not in loaded.get("/roster/").text
+    assert loaded.get("/maps/modifiers.json").status_code == 404
+    assert loaded.post("/maps/modifiers", data={"mod_Rabid": "5"}).status_code == 404

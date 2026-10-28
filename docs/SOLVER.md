@@ -10,7 +10,7 @@ The solver lives in [`webapp/engine`](../webapp/engine) and has no web dependenc
 
 The web app calls `solve_stage()` with the stage you entered.
 
-Given your cards, the key points of a stage and your modifier stock, it suggests which cards
+Given your cards and the key points of a stage, it suggests which cards
 to place where, and with which modifiers, so that the key points' requirements are met as
 reliably as possible and as many battles as possible are won
 possible.
@@ -23,7 +23,7 @@ flowchart LR
         R["Cards<br/>stats, abilities, HP, used, type"]
         K["Key points<br/>4 enemy slots each:<br/>power, boost, vulnerabilities, must-win"]
         E["Per key point<br/>wins needed, % conditions,<br/>barred cards / types,<br/>blocked modifier slots"]
-        M["Modifier stock<br/>count of each modifier"]
+        M["Modifiers<br/>web app: any can be bought,<br/>CSV: a count of each"]
     end
     R & K & E & M --> S(["solve_stage()"])
     S --> P["Best plan + an alternative assigning<br/>at least 3 cards differently (web app)<br/>card + modifiers per slot,<br/>win chance per battle,<br/>requirements chance, expected wins, HP cost"]
@@ -52,7 +52,7 @@ flowchart TD
     Z --> M1
 
     subgraph P2 ["Phase 2: modifiers"]
-        M1["For each kept split, best first while time allows:<br/>try every useful way to add 1–2 modifiers<br/>(one grey + one green per card,<br/>within stock, not in blocked slots)"]
+        M1["For each kept split, best first while time allows:<br/>try every useful way to add 1–2 modifiers<br/>(CSV: up to 2 per stage, within stock;<br/>web app: one grey + one green per card,<br/>each needed for a certain win;<br/>never in blocked slots)"]
         M1 --> M2["Re-score only the key points that changed<br/>(each key point + modifier set computed once)"]
     end
 
@@ -163,7 +163,24 @@ possible card splits. These keep the solve to seconds, without changing which pl
    while the time budget allows; the map page says if it had to stop early. On a hard stage
    with a −100% buff power key point this found 11.95 expected wins at HP cost 198, where 40
    splits gave 11 wins at HP cost 269.5.
-7. **Reused modifier results.** A key point's result with a given set of modifiers is
+7. **Modifiers for certainty (web app).** The web app does not count modifiers: it assumes
+   any can be bought, and each card can take one grey and one green, as in the game. They
+   are kept for what is otherwise hard to reach: **each** modifier used must be needed to
+   make something certain, meaning more battles won at 100%, or the key point's
+   requirements (must-win enemies, required wins) met at 100%. A modifier that only lifts a
+   battle from 60% to 80% is not suggested. Key points never share modifiers, so each key
+   point plan is worked out once and reused by every split that contains it:
+   - for each battle below 100%, the fewest (then cheapest) modifiers that reach it and
+     make it certain, trying up to 3 together and keeping the 3 cheapest ways;
+   - every mix of those ways across the key point's battles, with any modifier that is not
+     needed dropped;
+   - Morale on certain wins where that makes the required wins certain.
+
+   [`tests/test_search.py`](../tests/test_search.py) checks this against trying every
+   grey and green on every card. Where you cannot buy or use modifiers, tick No grey / No
+   green modifiers on the key point: the solver then maximizes the chances with cards
+   alone.
+8. **Reused modifier results.** A key point's result with a given set of modifiers is
    computed once and shared by every split and variant that contains it.
 
 [`tests/test_search.py`](../tests/test_search.py) checks that the results match the plain

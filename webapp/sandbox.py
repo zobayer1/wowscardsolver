@@ -1,13 +1,12 @@
-"""Map sandbox: per-map card copies, the shared modifier stock, stages, key points, battles.
+"""Map sandbox: per-map card copies, stages, key points, battles.
 
 Each map has its own copy of the roster. A new map starts every card at full HP and unused;
 finishing a stage clears the used flags but keeps HP. Recording a battle marks its cards
-used. The modifier stock is shared by all maps; each modifier carries a version that goes up
-on every change, so saving counts from an out-of-date page is refused.
+used. Modifiers are not counted: the solver assumes any of them can be bought, unless a key
+point blocks grey or green ones.
 """
 
 import json
-from collections import Counter
 from datetime import datetime
 from math import prod
 
@@ -23,7 +22,11 @@ MAX_KEYPOINTS = 5
 # Two plans; the option trim widens while a solve stays within about 20 seconds.
 # Plan 2 must change at least 3 card assignments from plan 1, to be a real alternative.
 # Up to 5,000 of the best card splits get the modifier search, as time allows.
-SOLVE_LIMITS = solver.SearchLimits(top=2, time_budget=20, distinct=3, keep=5000)
+# Every modifier counts as available, one grey and one green per card; a modifier is only
+# used where it is needed to make a battle, or a key point's requirements, certain.
+SOLVE_LIMITS = solver.SearchLimits(top=2, time_budget=20, distinct=3, keep=5000,
+                                   mods_for_certainty=True)
+AVAILABLE_MODS = dict.fromkeys(solver.MODIFIERS, 1)
 GREY_MODS = [n for n, (kind, _) in solver.MODIFIERS.items() if kind == "grey"]
 GREEN_MODS = [n for n, (kind, _) in solver.MODIFIERS.items() if kind == "green"]
 
@@ -72,39 +75,6 @@ def map_cards(db, map_id):
                       (map_id,)).fetchall()
 
 
-# ---------------------------------------------------------------- shared modifier stock
-def modifier_stock(db):
-    """{name: {"count": n, "version": v}} for every modifier, in the built-in order."""
-    rows = {r["name"]: {"count": r["count"], "version": r["version"]}
-            for r in db.execute("SELECT name, count, version FROM modifier")}
-    return {n: rows.get(n, {"count": 0, "version": 0}) for n in solver.MODIFIERS}
-
-
-def modifier_counts(db):
-    """{modifier name: count}, in the built-in modifier order."""
-    return {n: s["count"] for n, s in modifier_stock(db).items()}
-
-
-def set_modifier_counts(db, counts, versions):
-    """Save new counts. versions: the version of each modifier the counts were edited from;
-    if any modifier has changed since, nothing is saved. Only changed counts get a new
-    version."""
-    stock = modifier_stock(db)
-    moved = [f"{n} (now {stock[n]['count']})" for n in counts
-             if versions.get(n) != stock[n]["version"]]
-    if moved:
-        raise SandboxError(f"The modifier stock changed since this page loaded: "
-                           f"{', '.join(moved)}. Nothing was saved. "
-                           f"Use Reload counts and enter your changes again.")
-    changed = {n: c for n, c in counts.items() if c != stock[n]["count"]}
-    with db:
-        db.executemany("UPDATE modifier SET count = ?, version = version + 1 WHERE name = ?",
-                       [(c, n) for n, c in changed.items()])
-        if changed:
-            _mark_stale(db)
-    return changed
-
-
 def set_card_state(db, map_id, state):
     """Overwrite HP and used flag of map cards ({map_card id: (hp, used)})."""
     with db:
@@ -114,17 +84,13 @@ def set_card_state(db, map_id, state):
 
 
 def _mark_stale(db, map_id=None, stage_id=None):
-    """Flag last solutions as out of date: one stage's, one map's open stage, or (with
-    neither given, for a modifier stock change) every map's open stage."""
+    """Flag last solutions as out of date: one stage's, or one map's open stage."""
     if stage_id is not None:
         db.execute("UPDATE stage SET solution_stale = 1 WHERE id = ? AND solution IS NOT NULL",
                    (stage_id,))
-    elif map_id is not None:
-        db.execute("UPDATE stage SET solution_stale = 1 "
-                   "WHERE map_id = ? AND finished = 0 AND solution IS NOT NULL", (map_id,))
     else:
         db.execute("UPDATE stage SET solution_stale = 1 "
-                   "WHERE finished = 0 AND solution IS NOT NULL")
+                   "WHERE map_id = ? AND finished = 0 AND solution IS NOT NULL", (map_id,))
 
 
 # ---------------------------------------------------------------- loading
@@ -266,8 +232,7 @@ def _keypoint(stage, keypoint_id):
 # ---------------------------------------------------------------- battles
 def record_battle(db, stage, keypoint_id, entries):
     """Record the battle at a key point. entries: list of dicts with slot, map_card_id,
-    grey_mod, green_mod, won. Each card loses 1 HP (after Fast Repair) and each modifier
-    used comes off the stock."""
+    grey_mod, green_mod, won. Each card loses 1 HP (after Fast Repair)."""
     _check_open(stage)
     kp = _keypoint(stage, keypoint_id)
     _validate_battle(db, stage, kp, entries)
@@ -295,13 +260,6 @@ def apply_plan(db, stage, plan_index):
                    for i, s in enumerate(pk["slots"], 1) if s["card"]]
         _validate_battle(db, stage, kp, entries)
         todo.append((kp, entries))
-    stock = modifier_counts(db)
-    used = Counter(n for _, entries in todo for e in entries
-                   for n in (e["grey_mod"], e["green_mod"]) if n)
-    short = [f"Only {stock[n]} {n} left, the plan uses {k}."
-             for n, k in used.items() if k > stock[n]]
-    if short:
-        raise SandboxError(" ".join(short))
     with db:
         for kp, entries in todo:
             _write_battle(db, stage, kp["id"], entries)
@@ -309,7 +267,7 @@ def apply_plan(db, stage, plan_index):
 
 
 def _write_battle(db, stage, keypoint_id, entries):
-    """Insert a validated battle and apply HP loss, used flags and modifier use."""
+    """Insert a validated battle and apply HP loss and used flags."""
     cards = {c["id"]: c for c in map_cards(db, stage["map_id"])}
     for e in entries:
         hp = cards[e["map_card_id"]]["hp"]
@@ -320,7 +278,6 @@ def _write_battle(db, stage, keypoint_id, entries):
                     int(e["won"]), hp))
         db.execute("UPDATE map_card SET hp = ?, used = 1 WHERE id = ?",
                    (hp_after, e["map_card_id"]))
-        _change_stock(db, e, -1)
     db.execute("UPDATE keypoint SET played = 1 WHERE id = ?", (keypoint_id,))
     _mark_stale(db, stage_id=stage["id"])
 
@@ -338,28 +295,16 @@ def toggle_won(db, stage, keypoint_id, slot):
 
 
 def undo_battle(db, stage, keypoint_id):
-    """Reverse a recorded battle: restore HP, used flags and modifiers; reopen the key point."""
+    """Reverse a recorded battle: restore HP and used flags; reopen the key point."""
     _check_open(stage)
     kp = _keypoint(stage, keypoint_id)
     with db:
         for b in kp["battles"]:
             db.execute("UPDATE map_card SET hp = ?, used = 0 WHERE id = ?",
                        (b["hp_before"], b["map_card_id"]))
-            _change_stock(db, b, +1)
         db.execute("DELETE FROM battle WHERE keypoint_id = ?", (keypoint_id,))
         db.execute("UPDATE keypoint SET played = 0 WHERE id = ?", (keypoint_id,))
         _mark_stale(db, stage_id=stage["id"])
-
-
-def _change_stock(db, entry, delta):
-    """Take (delta -1) or give back (+1) the modifiers of one battle entry. The stock is
-    shared, so every map's open plan goes out of date."""
-    names = [n for n in (entry["grey_mod"], entry["green_mod"]) if n]
-    for name in names:
-        db.execute("UPDATE modifier SET count = count + ?, version = version + 1 "
-                   "WHERE name = ?", (delta, name))
-    if names:
-        _mark_stale(db)
 
 
 def _validate_battle(db, stage, kp, entries):
@@ -376,10 +321,6 @@ def _validate_battle(db, stage, kp, entries):
     seen = set()
     for e in entries:
         errors += _entry_errors(e, cards.get(e["map_card_id"]), rules, seen)
-    stock = modifier_counts(db)
-    used = Counter(n for e in entries for n in (e["grey_mod"], e["green_mod"]) if n)
-    errors += [f"Only {stock.get(name, 0)} {name} left, {n} used."
-               for name, n in used.items() if n > stock.get(name, 0)]
     if errors:
         raise SandboxError(" ".join(errors))
 
@@ -448,7 +389,7 @@ def solve(db, stage):
     search = {}
     best, n_plans, n_total = solver.solve_stage(
         roster, [solver_keypoint(kp, cards) for kp in open_kps], 0,
-        modifier_counts(db), SOLVE_LIMITS, report=search)
+        AVAILABLE_MODS, SOLVE_LIMITS, report=search)
     ids = {c["name"]: c["id"] for c in cards}
     solution = {"compared": n_plans,
                 "variants": n_total, "options": search["options"], "exact": search["exact"],

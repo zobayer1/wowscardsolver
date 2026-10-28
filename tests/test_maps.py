@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from conftest import KEYPOINT_1, KEYPOINT_2, ROSTER_SIZE, STOCK, flashes
+from conftest import KEYPOINT_1, KEYPOINT_2, ROSTER_SIZE, flashes
 
 from webapp import create_app
 
@@ -109,7 +109,7 @@ def test_solving_maximizes_wins_without_a_stage_goal(stage1, solution):
     assert all(s["card"] != "Ency" for s in sol["plans"][0]["keypoints"][0]["slots"])
 
 
-def test_recording_takes_hp_marks_used_and_spends_modifiers(stage1, query, solution):
+def test_recording_takes_hp_and_marks_used(stage1, query, solution):
     stage1.post("/maps/stage/1/solve")
     form = record_plan(stage1, solution, lose_slot=4, grey="Gunnery")
     html = stage1.get("/maps/1").text
@@ -118,8 +118,7 @@ def test_recording_takes_hp_marks_used_and_spends_modifiers(stage1, query, solut
         row = query("SELECT hp, used FROM map_card WHERE id = ?", int(form[f"card{i}"]))[0]
         assert row == {"hp": 2, "used": 1}
     assert len(query("SELECT * FROM map_card WHERE map_id = 1 AND used = 1")) == 4
-    gunnery = query("SELECT count FROM modifier WHERE name = 'Gunnery'")
-    assert gunnery[0]["count"] == STOCK["Gunnery"] - 1
+    assert query("SELECT grey_mod FROM battle WHERE slot = 1")[0]["grey_mod"] == "Gunnery"
     assert query("SELECT solution_stale FROM stage WHERE id = 1")[0]["solution_stale"] == 1
 
 
@@ -146,8 +145,6 @@ def test_fast_repair_and_undo(stage1, query):
     r = stage1.post("/maps/keypoint/2/undo", follow_redirects=True)
     assert "Battle undone" in r.text
     assert query("SELECT hp, used FROM map_card WHERE id = ?", card)[0] == {"hp": 2, "used": 0}
-    fast = query("SELECT count FROM modifier WHERE name = 'Fast Repair'")
-    assert fast[0]["count"] == STOCK["Fast Repair"]
 
 
 def test_played_keypoint_cannot_be_edited(stage1, solution):
@@ -188,57 +185,16 @@ def test_finish_clears_used_and_keeps_hp(stage1, query, solution):
     assert query("SELECT hp FROM map_card WHERE id = ?", int(form["card1"]))[0]["hp"] == 2
 
 
-def test_modifier_stock_is_shared_between_maps(stage1, query, solution):
-    stage1.post("/maps/stage/1/solve")
-    record_plan(stage1, solution, grey="Gunnery")
-    stage1.post("/maps/new", data={"name": "Second"})
-    rows = query("SELECT * FROM map_card WHERE map_id = 2 AND hp = 3 AND used = 0")
-    assert len(rows) == ROSTER_SIZE
-    assert query("SELECT count FROM modifier WHERE name = 'Gunnery'")[0]["count"] == \
-        STOCK["Gunnery"] - 1
-    assert 'name="mod_Gunnery" type="number" min="0" value="1"' in stage1.get("/maps/2").text
-
-
-def stock_form(client):
-    """The modifier form as a map page would submit it: current counts and versions."""
-    stock = client.get("/maps/modifiers.json").get_json()
-    return {**{f"mod_{n}": str(s["count"]) for n, s in stock.items()},
-            **{f"ver_{n}": str(s["version"]) for n, s in stock.items()}}
-
-
-def test_saving_modifier_counts_bumps_only_changed_versions(map1, query):
-    before = {r["name"]: r["version"] for r in query("SELECT name, version FROM modifier")}
-    r = map1.post("/maps/modifiers", data=dict(stock_form(map1), mod_Gunnery="7"),
-                  follow_redirects=True)
-    assert "Modifier stock saved: Gunnery 7." in flashes(r.text)
-    after = {r["name"]: r["version"] for r in query("SELECT name, version FROM modifier")}
-    assert after == dict(before, Gunnery=before["Gunnery"] + 1)
-    r = map1.post("/maps/modifiers", data=stock_form(map1), follow_redirects=True)
-    assert "Modifier stock unchanged." in flashes(r.text)
-
-
-def test_saving_from_an_old_page_is_rejected(map1, query):
-    old = stock_form(map1)                       # page A loads the stock
-    map1.post("/maps/modifiers", data=dict(stock_form(map1), mod_Rabid="1"))  # page B saves
-    r = map1.post("/maps/modifiers", data=dict(old, mod_Gunnery="9"), follow_redirects=True)
-    assert any("changed since this page loaded: Rabid (now 1)" in m for m in flashes(r.text))
-    counts = {r["name"]: r["count"] for r in query("SELECT name, count FROM modifier")}
-    assert counts["Gunnery"] == STOCK["Gunnery"] and counts["Rabid"] == 1
-    r = map1.post("/maps/modifiers", data=dict(old, ver_Gunnery=""), follow_redirects=True)
-    assert any("Nothing was saved" in m for m in flashes(r.text))
-
-
-def test_battles_bump_modifier_versions_and_mark_other_maps_stale(stage1, query, solution):
+def test_maps_are_independent(stage1, query, solution):
     stage1.post("/maps/new", data={"name": "Second"})
     stage1.post("/maps/2/stages/new")
     stage1.post("/maps/stage/2/keypoints/new", data=KEYPOINT_2)
     stage1.post("/maps/stage/2/solve")
-    old = stock_form(stage1)
     stage1.post("/maps/stage/1/solve")
     record_plan(stage1, solution, grey="Gunnery")
-    assert query("SELECT solution_stale FROM stage WHERE id = 2")[0]["solution_stale"] == 1
-    r = stage1.post("/maps/modifiers", data=old, follow_redirects=True)
-    assert any("Gunnery (now 1)" in m for m in flashes(r.text))
+    rows = query("SELECT * FROM map_card WHERE map_id = 2 AND hp = 3 AND used = 0")
+    assert len(rows) == ROSTER_SIZE
+    assert query("SELECT solution_stale FROM stage WHERE id = 2")[0]["solution_stale"] == 0
 
 
 def test_manual_card_edits(map1, query):
@@ -247,9 +203,6 @@ def test_manual_card_edits(map1, query):
     assert query("SELECT hp, used FROM map_card WHERE id = ?", cid)[0] == {"hp": 1, "used": 1}
     rows = query("SELECT * FROM map_card WHERE map_id = 1 AND hp = 3 AND used = 0")
     assert len(rows) == ROSTER_SIZE - 1
-    r = map1.post("/maps/modifiers", data=dict(stock_form(map1), mod_Gunnery="-1"),
-                  follow_redirects=True)
-    assert "Gunnery must be 0 or more." in flashes(r.text)
 
 
 def test_maps_list_and_delete(map1, query):
@@ -286,23 +239,19 @@ def test_keypoint_editor_tabs_across_the_slots(map1):
     assert names == [row.format(slot) for row in rows for slot in range(1, 5)]
 
 
-def test_old_per_map_stock_migrates_to_the_shared_stock(tmp_path):
+def test_old_modifier_stock_tables_are_dropped(tmp_path):
     path = str(tmp_path / "old.db")
     create_app({"TESTING": True, "DATABASE": path})
     db = sqlite3.connect(path)
-    db.execute("DELETE FROM modifier")
+    db.execute("CREATE TABLE modifier (name TEXT PRIMARY KEY, count INTEGER, version INTEGER)")
     db.execute("CREATE TABLE map_modifier (map_id INTEGER, name TEXT, count INTEGER)")
-    db.executemany("INSERT INTO map_modifier VALUES (?, ?, ?)",
-                   [(1, "Gunnery", 9), (1, "Rabid", 9), (4, "Gunnery", 2), (4, "Rabid", 7)])
     db.commit()
     db.close()
     create_app({"TESTING": True, "DATABASE": path})  # runs the migration
     db = sqlite3.connect(path)
-    counts = dict(db.execute("SELECT name, count FROM modifier"))
     tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     db.close()
-    assert counts["Gunnery"] == 2 and counts["Rabid"] == 7 and counts["Dodge"] == 0
-    assert len(counts) == len(STOCK) and "map_modifier" not in tables
+    assert not tables & {"modifier", "map_modifier"}
 
 
 def test_barred_types_reach_the_solver_and_block_recording(map1, query):
@@ -376,3 +325,4 @@ def test_enemy_boost_is_saved_and_shown(map1, query):
         stage = sandbox.load_stage(get_db(), 1)
         kp = sandbox.solver_keypoint(stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
     assert kp.enemies[1].boost == 16
+

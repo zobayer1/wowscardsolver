@@ -11,6 +11,9 @@
   <label class="check"><input type="checkbox" name="no_grey" {{ 'checked' if env.no_grey }}> No grey modifiers</label>
   <label class="check"><input type="checkbox" name="no_green" {{ 'checked' if env.no_green }}> No green modifiers</label>
 </div>
+<p class="hint">The solver assumes every modifier can be bought. Tick these if you cannot buy or
+  use them here: it then gets the best chances from cards alone, and you can try the modifiers
+  you have by hand.</p>
 {% set types = cards|map(attribute='type')|select|unique|sort|list %}
 {% if types %}
 <div class="checks barred-types">

@@ -24,7 +24,7 @@ import heapq
 import time
 from collections import Counter
 from dataclasses import dataclass
-from itertools import combinations, permutations
+from itertools import combinations, permutations, product
 from math import prod
 
 from .model import (BUFF_OFFSET, DEBUFF_OFFSET, HP_PCT, MODIFIERS, NO_EFFECT_MODS, PARAMS,
@@ -79,6 +79,10 @@ class SearchLimits:
     # assignments (which key point a card goes to, or none) from every earlier plan; each
     # such plan costs one more search. 0 returns the top plans as ranked.
     distinct: int = 0
+    # When True (the web app), max_mods does not apply: each card may take one grey and one
+    # green modifier, and modifiers are only used where they make something certain (see
+    # _certain_mods). Otherwise up to max_mods per stage, whenever they raise the rank key.
+    mods_for_certainty: bool = False
 
 
 class _OutOfTime(Exception):
@@ -520,13 +524,29 @@ def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins, only_be
     whole stage) of the splits held in `top`, pushing the good ones into it. Each key
     point's result with a given set of modifiers is computed once. With a `deadline`, the
     splits are taken best first and the search stops when time.perf_counter() passes it.
+    With limits.mods_for_certainty, each key point gets its own modifiers instead (see
+    _certain_mods), and each split is pushed once with them.
     Returns (variants scored, splits whose modifier search was completed)."""
     entries, n, done = {}, 0, 0
+    names = frozenset(nm for nm, q in inventory.items() if q > 0 and nm not in NO_EFFECT_MODS)
     splits = sorted(top.heap, reverse=True) if deadline is not None else list(top.heap)
     for _, _, combo in splits:
         if deadline is not None and time.perf_counter() > deadline:
             break
         done += 1
+        if limits.mods_for_certainty:
+            new_combo, stats = [], []
+            for ki, (e, kp, need) in enumerate(zip(combo, keypoints, kp_mins)):
+                key = (ki, id(e))
+                if key not in entries:
+                    entries[key] = _certain_mods(e, kp, need, names)
+                    n += 1
+                new_combo.append(entries[key])
+                stats.append(_part_stats(entries[key][4], need))
+            key = _stage_key(stats, min_wins)
+            if len(top.heap) < limits.keep or key > top.heap[0][0]:
+                top.push(key, new_combo)
+            continue
         base = [_part_stats(e[4], need) for e, need in zip(combo, kp_mins)]
         allowed = _useful_modifiers(combo, keypoints, base, min_wins) if only_best else None
         if allowed is not None and not allowed:
@@ -546,6 +566,114 @@ def _add_modifiers(top, keypoints, inventory, limits, min_wins, kp_mins, only_be
             if len(top.heap) < limits.keep or key > top.heap[0][0]:
                 top.push(key, new_combo)
     return n, done
+
+
+# ---------------------------------------------------------------- modifiers for certainty
+_PER_BATTLE = 3      # most modifiers tried together to make one battle certain
+_WAYS = 3            # cheapest ways kept per battle
+
+
+def _mod_spend(assign):
+    return sum(MODIFIERS[name][1] for _, name in assign)
+
+
+def _fits(assign):
+    """True if no card gets two modifiers of one kind (one grey and one green per card)."""
+    seen = set()
+    for i, name in assign:
+        if (i, MODIFIERS[name][0]) in seen:
+            return False
+        seen.add((i, MODIFIERS[name][0]))
+    return True
+
+
+def _certain_mods(entry, kp, need, names):  # pylint: disable=too-many-locals
+    """One key point's plan entry with the modifiers that make the most of it certain: every
+    battle certain that some modifiers can make certain, then the key point's requirements
+    (Morale on certain wins). Each card takes at most one grey and one green, and every
+    modifier kept is needed: without it fewer battles, or not the requirements, would be
+    certain. Among such choices the best by rank (requirements chance, expected wins,
+    spend, cost) is returned; the entry itself if no modifier makes anything certain."""
+    cards = entry[1]
+    blocked = kp.no_mods
+    scored = {}
+
+    def score(assign):
+        """(entry, rank key, certainty) of the key point with these (slot, name) pairs."""
+        hit = scored.get(assign)
+        if hit is None:
+            mods = tuple(tuple(name for s, name in sorted(
+                assign, key=lambda a: MODIFIERS[a[1]][0] != "grey") if s == i)
+                for i in range(4))
+            e = _with_mods(entry, kp, mods)
+            key = _stage_key([_part_stats(e[4], need)], 0)
+            sure = sum(1 for r in e[3] if r["card"] is not None and r["p"] >= 1)
+            hit = scored[assign] = (e, key, (key[0] >= 1, sure))
+        return hit
+
+    def usable(name):
+        return name in names and MODIFIERS[name][0] not in blocked
+
+    base = score(frozenset())
+    # The cheapest ways (fewest modifiers, then fewest points) to make each open battle certain.
+    ways = []
+    for j, r in enumerate(entry[3]):
+        if r["card"] is None or r["p"] >= 1:
+            continue
+        only_j = [s == j for s in range(4)]
+        options = [(i, name) for i, c in enumerate(cards) if c is not None
+                   for name in _useful_on(c, i, kp, only_j, False) if usable(name)]
+        found = []
+        for size in range(1, _PER_BATTLE + 1):
+            for chosen in combinations(options, size):
+                if _fits(chosen) and score(frozenset(chosen))[0][3][j]["p"] >= 1:
+                    found.append(frozenset(chosen))
+            if found:
+                break
+        if found:
+            ways.append(sorted(found, key=_mod_spend)[:_WAYS])
+
+    # Every mix of those ways (or none) per battle, trimmed to the modifiers it needs.
+    candidates = {frozenset()}
+    for pick in product(*[[frozenset()] + w for w in ways]):
+        union = frozenset().union(*pick)
+        if union and _fits(union):
+            candidates.add(_trim(union, score))
+    if need and usable("Morale"):
+        candidates |= _with_morale(candidates, score)
+    best = max(candidates, key=lambda a: score(a)[1])
+    return score(best)[0] if score(best)[2] > base[2] else entry
+
+
+def _with_morale(candidates, score):
+    """Morale on 1 or 2 certain wins (with a free grey slot) of each candidate whose key
+    point requirements are not certain yet, where that makes them certain."""
+    more = set()
+    for assign in candidates:
+        e, _, (req, _) = score(assign)
+        if req:
+            continue
+        free = [i for i, r in enumerate(e[3]) if r["card"] is not None and r["p"] >= 1
+                and not any(s == i and MODIFIERS[nm][0] == "grey" for s, nm in assign)]
+        for size in (1, 2):
+            for slots in combinations(free, size):
+                extra = assign | {(i, "Morale") for i in slots}
+                if score(extra)[2][0]:
+                    more.add(_trim(extra, score))
+    return more
+
+
+def _trim(assign, score):
+    """Drop modifiers (most expensive first) whose removal keeps the same certainty."""
+    level = score(assign)[2]
+    trimmed = True
+    while trimmed:
+        trimmed = False
+        for item in sorted(assign, key=lambda a: -MODIFIERS[a[1]][1]):
+            if score(assign - {item})[2] >= level:
+                assign, trimmed = assign - {item}, True
+                break
+    return assign
 
 
 # What each modifier can change: the card's own battle, the battles its buffs or debuffs

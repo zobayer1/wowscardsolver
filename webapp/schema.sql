@@ -46,14 +46,6 @@ CREATE TABLE IF NOT EXISTS map_card (
     UNIQUE (map_id, name)
 );
 
--- Modifier stock, shared by all maps. version goes up on every change, so a form saved
--- from an out-of-date page can be rejected.
-CREATE TABLE IF NOT EXISTS modifier (
-    name     TEXT    PRIMARY KEY,
-    count    INTEGER NOT NULL DEFAULT 0 CHECK (count >= 0),
-    version  INTEGER NOT NULL DEFAULT 1
-);
-
 -- A key point's environment: conditions in percent (firepower .. debuff_power), barred card
 -- names and types (JSON lists), and blocked modifier slots.
 CREATE TABLE IF NOT EXISTS stage (

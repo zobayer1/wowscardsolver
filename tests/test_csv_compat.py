@@ -5,7 +5,7 @@ CSV workflow."""
 
 import pytest
 
-from conftest import DATA, set_stock, upload
+from conftest import DATA, upload
 
 from webapp import sandbox
 from webapp.db import get_db
@@ -18,11 +18,10 @@ TOP = 2
 
 @pytest.fixture(scope="module")
 def csv_stage():
-    """Roster, key points, stage goal and inventory as the command-line solver loads them."""
+    """Roster and key points as the CSV loader reads them."""
     roster = solver.load_roster(DATA / "roster.csv")
-    inventory = solver.load_modifiers(DATA / "modifiers.csv")
-    keypoints, min_wins = solver.load_stage(DATA / "board.csv", DATA / "environment.csv", roster)
-    return roster, keypoints, min_wins, inventory
+    keypoints, _ = solver.load_stage(DATA / "board.csv", DATA / "environment.csv", roster)
+    return roster, keypoints
 
 
 def env_form(cond, barred, no_mods):
@@ -49,10 +48,9 @@ def enemy_form(enemies):
 @pytest.fixture
 def ui_stage(client, csv_stage, query):
     """The same game entered through the web routes, as a user would."""
-    roster, keypoints, _, inventory = csv_stage
+    roster, keypoints = csv_stage
     upload(client, (DATA / "roster.csv").read_bytes())
     client.post("/maps/new", data={"name": "From CSV"})
-    set_stock(client, {n: inventory.get(n, 0) for n in solver.MODIFIERS})
     ids = {r["name"]: r["id"] for r in query("SELECT id, name FROM map_card WHERE map_id = 1")}
     client.post("/maps/1/stages/new")
     cards = {f"hp_{ids[c.name]}": str(c.hp) for c in roster}
@@ -71,7 +69,7 @@ def ui_stage(client, csv_stage, query):
 
 
 def test_ui_gives_the_solver_the_same_inputs(ui_stage, csv_stage):
-    roster, keypoints, _, inventory = csv_stage
+    roster, keypoints = csv_stage
     with ui_stage.application.app_context():
         db = get_db()
         stage = sandbox.load_stage(db, 1)
@@ -79,9 +77,7 @@ def test_ui_gives_the_solver_the_same_inputs(ui_stage, csv_stage):
                      for c in sandbox.map_cards(db, 1)]
         cards = sandbox.map_cards(db, 1)
         ui_keypoints = [sandbox.solver_keypoint(kp, cards) for kp in stage["keypoints"]]
-        ui_inventory = sandbox.modifier_counts(db)
     assert sorted(ui_roster, key=lambda c: c.name) == sorted(roster, key=lambda c: c.name)
-    assert ui_inventory == {n: inventory.get(n, 0) for n in solver.MODIFIERS}
     assert len(ui_keypoints) == len(keypoints)
     for ui, kp in zip(ui_keypoints, keypoints):
         assert ui.enemies == kp.enemies
@@ -92,12 +88,13 @@ def test_ui_gives_the_solver_the_same_inputs(ui_stage, csv_stage):
 
 
 def test_ui_and_csv_give_the_same_best_plans(ui_stage, csv_stage, solution):
-    roster, keypoints, _, inventory = csv_stage
-    # The web app has no stage goal (it maximizes wins), so the CSV's stage goal is not used.
+    roster, keypoints = csv_stage
+    # The web app has no stage goal (it maximizes wins) and does not count modifiers, so the
+    # CSV's stage goal and modifier counts are not used.
     # The map lists cards by name, so solve the CSV roster in that order too: equally ranked
     # plans are then broken the same way and the placements match exactly.
     by_name = sorted(roster, key=lambda c: c.name.lower())
-    best, _, _ = solver.solve_stage(by_name, keypoints, 0, inventory,
+    best, _, _ = solver.solve_stage(by_name, keypoints, 0, sandbox.AVAILABLE_MODS,
                                     sandbox.SOLVE_LIMITS)   # the web app's limits (fixed trim)
     ui_stage.post("/maps/stage/1/solve")
     plans = solution(1)["plans"]

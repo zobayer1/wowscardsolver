@@ -48,7 +48,7 @@
           <div class="panel-actions">
             {% if kp.played %}
             <form method="post" action="{{ url_for('maps.undo', keypoint_id=kp.id) }}"
-                  onsubmit="return confirm('Undo the battle at key point {{ kp.number }}? HP, used flags and modifiers are restored.');">
+                  onsubmit="return confirm('Undo the battle at key point {{ kp.number }}? HP and used flags are restored.');">
               <button class="button small" type="submit">Undo battle</button>
             </form>
             {% else %}
@@ -95,11 +95,11 @@
                 <div class="mods-row">
                   <select name="grey{{ slot }}" aria-label="Grey modifier" {{ 'disabled' if kp.no_grey }}>
                     <option value="">No grey</option>
-                    {% for n in grey_mods if modifiers[n] > 0 %}<option>{{ n }}</option>{% endfor %}
+                    {% for n in grey_mods %}<option>{{ n }}</option>{% endfor %}
                   </select>
                   <select name="green{{ slot }}" aria-label="Green modifier" {{ 'disabled' if kp.no_green }}>
                     <option value="">No green</option>
-                    {% for n in green_mods if modifiers[n] > 0 %}<option>{{ n }}</option>{% endfor %}
+                    {% for n in green_mods %}<option>{{ n }}</option>{% endfor %}
                   </select>
                 </div>
                 <label class="check"><input type="checkbox" name="won{{ slot }}"> Won</label>
@@ -175,7 +175,7 @@
               <form method="post" action="{{ url_for('maps.apply_plan', stage_id=st.id, plan_index=plan_index) }}"
                     {% if st.solution_stale %}onsubmit="return confirm('Inputs changed since this plan was made. Apply it anyway?');"{% endif %}>
                 <button class="button primary small" type="submit"
-                        title="Record this plan: HP, used cards and modifiers update automatically">Apply plan {{ loop.index }}</button>
+                        title="Record this plan: HP and used cards update automatically">Apply plan {{ loop.index }}</button>
               </form>
               {% endif %}
             </div>
@@ -335,8 +335,6 @@
         </div>
       </form>
     </section>
-
-    {% include "_modifiers_panel.html" %}
   </aside>
 </div>
 <script>

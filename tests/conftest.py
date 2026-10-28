@@ -16,11 +16,6 @@ DATA = Path(__file__).parent / "data"
 # Number of cards in the test roster.
 ROSTER_SIZE = (DATA / "roster.csv").read_text(encoding="utf-8").strip().count("\n")
 
-# Modifier stock every test map starts with.
-STOCK = {"Gunnery": 2, "Damage Control": 3, "Dodge": 3, "Teamwork": 0, "Effectiveness": 3,
-         "Morale": 0, "Focused": 3, "Specialization": 3, "Rabid": 7, "Fast Repair": 8,
-         "Unstoppable": 4}
-
 # A full key point: four enemies with vulnerabilities.
 KEYPOINT_1 = {
     "power1": "115", "vuln1_1": "AA Fire", "vuln2_1": "Smoke Screen",
@@ -84,19 +79,10 @@ def loaded(client, roster_csv):
     return client
 
 
-def set_stock(client, counts):
-    """Save modifier counts through the map page form, with the current versions."""
-    stock = client.get("/maps/modifiers.json").get_json()
-    data = {f"ver_{n}": str(s["version"]) for n, s in stock.items()}
-    data.update({f"mod_{n}": str(counts.get(n, s["count"])) for n, s in stock.items()})
-    return client.post("/maps/modifiers", data=data, follow_redirects=True)
-
-
 @pytest.fixture
 def map1(loaded):
-    """A client with map 1 started and the STOCK modifier counts."""
+    """A client with map 1 started."""
     loaded.post("/maps/new", data={"name": "Test map"})
-    set_stock(loaded, STOCK)
     return loaded
 
 

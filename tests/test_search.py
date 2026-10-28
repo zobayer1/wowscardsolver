@@ -7,7 +7,7 @@ of the best splits."""
 
 import random
 from collections import Counter
-from itertools import combinations
+from itertools import combinations, product
 
 import pytest
 
@@ -52,6 +52,17 @@ def reference_mods(chosen, n_kp, inventory):
     return [[tuple(x) for x in kp] for kp in mods]
 
 
+def reference_variant(combo, keypoints, mods, min_wins, kp_mins):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    """A split with modifiers (per key point, per slot), re-scored."""
+    new = []
+    for e, kp, m in zip(combo, keypoints, mods):
+        if any(m):
+            res = solver.evaluate(e[1], kp.enemies, kp.cond, m)
+            e = (e[0], e[1], m, res, solver.summarize(res, kp.enemies, m))
+        new.append(e)
+    return new, solver.stage_summary([e[4] for e in new], min_wins, kp_mins)
+
+
 def reference_solve(roster, keypoints, min_wins, inventory, limits, accept=None):  # pylint: disable=too-many-arguments,too-many-positional-arguments
     """The top plans; with `accept`, only card splits it accepts are considered."""
     avail = [c for c in roster if c.hp > 0 and not c.used]
@@ -76,13 +87,7 @@ def reference_solve(roster, keypoints, min_wins, inventory, limits, accept=None)
                     mods = reference_mods(chosen, len(combo), inventory)
                     if mods is None:
                         continue
-                    new = []
-                    for e, kp, m in zip(combo, keypoints, mods):
-                        if any(m):
-                            res = solver.evaluate(e[1], kp.enemies, kp.cond, m)
-                            e = (e[0], e[1], m, res, solver.summarize(res, kp.enemies, m))
-                        new.append(e)
-                    st = solver.stage_summary([e[4] for e in new], min_wins, kp_mins)
+                    new, st = reference_variant(combo, keypoints, mods, min_wins, kp_mins)
                     top.push(solver.rank_key(st), (new, st))
     return top.best(limits.top)
 
@@ -292,3 +297,57 @@ def test_useful_modifier_filter_keeps_the_best_plan_under_conditions(seed, cond)
     fast, _, _ = solver.solve_stage(cards, keypoints, goal, inventory, limits)
     slow = reference_solve(cards, keypoints, goal, inventory, limits)
     assert solver.rank_key(fast[0][1]) == solver.rank_key(slow[0][1])
+
+
+def reference_certain(entry, kp, need, names):
+    """Every way to give the key point's cards one grey and one green (from `names`) where
+    each modifier is needed for the certainty (requirements certain, battles certain);
+    the best by rank, or the entry itself if none makes anything certain."""
+    def scored(mods):
+        res = solver.evaluate(entry[1], kp.enemies, kp.cond, mods)
+        e = (entry[0], entry[1], mods, res, solver.summarize(res, kp.enemies, mods))
+        st = solver.stage_summary([e[4]], 0, [need])
+        sure = sum(1 for r in res if r["card"] is not None and r["p"] >= 1)
+        return e, solver.rank_key(st), (solver.rank_key(st)[0] >= 1, sure)
+
+    names = [n for n in names if solver.MODIFIERS[n][0] not in kp.no_mods]
+    greys = [None] + [n for n in names if solver.MODIFIERS[n][0] == "grey"]
+    greens = [None] + [n for n in names if solver.MODIFIERS[n][0] == "green"]
+    per_slot = [[()] if c is None else
+                [tuple(x for x in (g, h) if x) for g in greys for h in greens]
+                for c in entry[1]]
+    base = scored([()] * 4)
+    best = base
+    for mods in product(*per_slot):
+        mods = list(mods)
+        if not any(mods):
+            continue
+        e, key, level = scored(mods)
+        if level <= base[2] or key <= best[1]:
+            continue
+        needed = all(scored([tuple(x for x in m if x != name) if j == i else m
+                             for j, m in enumerate(mods)])[2] < level
+                     for i, m in enumerate(mods) for name in m)
+        if needed:
+            best = (e, key, level)
+    return best[0]
+
+
+@pytest.mark.parametrize("make, seed", [
+    (close_stage, 0), (close_stage, 14), (close_stage, 24), (close_stage, 37),
+    (close_stage, 45), (random_stage, 3), (random_stage, 6), (random_stage, 8)])
+def test_modifiers_for_certainty_match_the_exhaustive_search(make, seed):
+    # As in the web app: any modifier, one grey and one green per card, each used only where
+    # it is needed to make a battle (or the key point's requirements) certain. A few
+    # modifier types keep the exhaustive search small.
+    cards, keypoints, _, _ = (make(seed, 7, 3) if make is close_stage else make(seed, 8, 2))
+    names = ("Gunnery", "Teamwork", "Rabid")
+    limits = solver.SearchLimits(top=1, keep=12, mods_for_certainty=True)
+    fast, _, _ = solver.solve_stage(cards, keypoints, 0, {n: 1 for n in names}, limits)
+    plain = solver.solve_stage(cards, keypoints, 0, None, solver.replace(limits, top=12))[0]
+    best = None
+    for combo, _ in plain:
+        new = [reference_certain(e, kp, kp.min_wins, names) for e, kp in zip(combo, keypoints)]
+        st = solver.stage_summary([e[4] for e in new], 0, [kp.min_wins for kp in keypoints])
+        best = max(best or solver.rank_key(st), solver.rank_key(st))
+    assert solver.rank_key(fast[0][1]) == best

@@ -42,10 +42,13 @@ DROPPED = [("enemy", "reward"),
                "wins_needed", "firepower", "survivability", "maneuverability", "enemy_power",
                "buff_power", "debuff_power", "barred", "barred_types", "no_grey", "no_green",
                "all_keypoints"))]
+# Tables no longer used. Modifiers used to be counted (per map, then shared); the solver now
+# assumes any modifier can be bought.
+DROPPED_TABLES = ("map_modifier", "modifier")
 
 
 def init_db():
-    """Create any missing tables and columns, and a stock row for every modifier."""
+    """Create any missing tables and columns; drop what is no longer used."""
     db = get_db()
     db.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
     for table, column, decl in MIGRATIONS:
@@ -54,22 +57,9 @@ def init_db():
     for table, column in DROPPED:
         if column in {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}:
             db.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
-    _migrate_map_modifiers(db)
-    db.executemany("INSERT OR IGNORE INTO modifier (name) VALUES (?)",
-                   [(n,) for n in solver.MODIFIERS])
+    for table in DROPPED_TABLES:
+        db.execute(f"DROP TABLE IF EXISTS {table}")
     db.commit()
-
-
-def _migrate_map_modifiers(db):
-    """Older databases kept a modifier stock per map. The latest map's stock becomes the
-    shared one (if none exists yet), and the old table is dropped."""
-    if not db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' "
-                      "AND name = 'map_modifier'").fetchone():
-        return
-    if not db.execute("SELECT 1 FROM modifier").fetchone():
-        db.execute("INSERT INTO modifier (name, count) SELECT name, count FROM map_modifier "
-                   "WHERE map_id = (SELECT MAX(map_id) FROM map_modifier)")
-    db.execute("DROP TABLE map_modifier")
 
 
 def card_to_row(card):

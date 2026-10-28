@@ -7,7 +7,6 @@ import sqlite3
 from flask import (Blueprint, Response, abort, flash, redirect, render_template, request,
                    url_for)
 
-from . import sandbox
 from .db import get_db, import_cards
 from .engine import solver
 
@@ -124,12 +123,9 @@ def _save(row, card_id=None):
 
 @bp.route("/")
 def index():
-    """The roster table, with the shared modifier stock alongside."""
-    db = get_db()
-    cards = db.execute("SELECT * FROM card ORDER BY name COLLATE NOCASE").fetchall()
-    return render_template("roster/list.html", cards=cards, describe=describe_ability,
-                           stock=sandbox.modifier_stock(db), grey_mods=sandbox.GREY_MODS,
-                           green_mods=sandbox.GREEN_MODS)
+    """The roster table."""
+    cards = get_db().execute("SELECT * FROM card ORDER BY name COLLATE NOCASE").fetchall()
+    return render_template("roster/list.html", cards=cards, describe=describe_ability)
 
 
 @bp.route("/add", methods=("GET", "POST"))

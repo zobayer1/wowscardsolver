@@ -6,8 +6,7 @@ point of a map stage, and with which modifiers, to win as many battles as possib
 beating every must-win enemy and each key point's required wins. See the [game rules](./docs/GAME_RULES.md) and
 [how the solver works](./docs/SOLVER.md).
 
-It is a small Flask web app that tracks a whole map for you: HP, used cards and the
-modifier stock.
+It is a small Flask web app that tracks a whole map for you: HP and used cards.
 
 ## Features
 
@@ -20,9 +19,9 @@ modifier stock.
   blocked modifier slots.
 - **Solver:** suggests the best plan and a real alternative (one that assigns at least 3 cards
   differently); **Apply plan** records the battles, takes 1 HP from
-  each card, marks the cards used and spends the modifiers.
-- **Modifier stock:** shared by all maps, with a version on every count, so saving from an
-  out-of-date page is refused.
+  each card and marks the cards used.
+- **Modifiers are not counted:** the solver assumes you can buy any modifier, and uses one
+  only where it makes a battle (or a key point's requirements) a certain win.
 
 ## Requirements
 
@@ -68,11 +67,13 @@ flask --app webapp import-roster path/to/roster.csv
 
 ### A typical map
 
-1. **Roster:** import or enter your cards and set the modifier counts in the panel on the
-   right.
+1. **Roster:** import or enter your cards.
 2. **New map** (top right) opens the map in a new tab with every card at 3 HP.
 3. **Start a New Stage** and add the key points as they appear, each with its enemies,
    conditions and the wins it needs (if any).
+   **If you cannot buy or use modifiers at a key point, tick No grey / No green modifiers
+   there.** The solver then gets the best win chances from cards alone, and you can try the
+   modifiers you do have by hand.
 4. **Solve**, then **Apply plan** on the plan you play. Correct any battle that went
    differently by clicking its Won / Lost.
 5. **Finish stage**: used marks clear and HP carries over into the next stage.
@@ -105,8 +106,7 @@ Among them:
   database automatically when it starts.
 - **Some modifier effects are assumptions** that have not been confirmed in the game. They are
   listed in [docs/SOLVER.md](./docs/SOLVER.md#assumptions-not-yet-confirmed-in-game).
-- **Several tabs:** maps are independent, but the modifier stock is shared. After another tab
-  uses or changes modifiers, use **Reload counts** before saving the stock.
+- **Several tabs:** maps are independent, so each can be open in its own tab.
 
 ## Project layout
 
@@ -115,7 +115,7 @@ webapp/
   engine/model.py     battle model: scores a placement of cards at a key point
   engine/search.py    stage search (solve_stage)
   engine/solver.py    CSV readers and validate(); re-exports the engine
-  sandbox.py          maps, stages, key points, battles and the modifier stock
+  sandbox.py          maps, stages, key points and battles
   maps.py, roster.py  web pages
   db.py, schema.sql   SQLite database and migrations
   templates/, static/ HTML and CSS

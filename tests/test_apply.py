@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from conftest import KEYPOINT_1, KEYPOINT_2, set_stock
+from conftest import KEYPOINT_1, KEYPOINT_2
 
 
 # Barred to keep the two-key-point search small (9 cards left) so the tests stay fast.
@@ -80,19 +80,19 @@ def test_next_stage_resets_used_and_keeps_applied_hp(solved, query, solution):
     assert "is finished" in r.text
 
 
-def test_apply_refuses_a_plan_beyond_the_modifier_stock(solved, query):
-    # Make plan 1 use a Gunnery, then run the stock out: nothing may be recorded.
+def test_apply_records_the_plan_modifiers(solved, query):
+    # Modifiers are not counted: a plan with any modifier is recorded as it is.
     sol = json.loads(query("SELECT solution FROM stage WHERE id = 1")[0]["solution"])
     first = next(s for s in sol["plans"][0]["keypoints"][0]["slots"] if s["card"])
-    first["mods"] = ["Gunnery"]
+    first["mods"] = ["Gunnery", "Focused"]
     with solved.application.app_context():
         from webapp.db import get_db  # pylint: disable=import-outside-toplevel
         get_db().execute("UPDATE stage SET solution = ? WHERE id = 1", (json.dumps(sol),))
         get_db().commit()
-    set_stock(solved, {"Gunnery": 0})
-    r = solved.post("/maps/stage/1/apply/0", follow_redirects=True)
-    assert "Only 0 Gunnery left" in r.text
-    assert query("SELECT COUNT(*) AS n FROM battle")[0]["n"] == 0
+    solved.post("/maps/stage/1/apply/0")
+    b = query("SELECT grey_mod, green_mod FROM battle WHERE map_card_id = ?",
+              first["map_card_id"])
+    assert b == [{"grey_mod": "Gunnery", "green_mod": "Focused"}]
 
 
 def test_plan_two_is_a_real_alternative(solved, solution):
