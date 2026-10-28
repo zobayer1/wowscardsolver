@@ -115,13 +115,13 @@
   {% set env = namespace(set=kp.min_wins or kp.barred or kp.barred_types or kp.no_grey or kp.no_green) %}
   {% for f in env_labels if kp[f] %}{% set env.set = true %}{% endfor %}
   <details class="kp-conditions" {{ 'open' if env.set }}>
-    <summary>Key point conditions (optional, added on top of the stage's)</summary>
+    <summary>Key point conditions (optional)</summary>
     <div class="fields">
       <label class="narrow">Wins needed here
         <input name="min_wins" type="number" min="0" value="{{ kp.min_wins if kp.min_wins }}" placeholder="auto"
                title="Leave blank to let the solver decide how many wins to take here.">
       </label>
-      <span class="hint end">Blank: the solver splits the stage goal across key points itself.</span>
+      <span class="hint end">Blank: no minimum; the solver still wins as many as it can.</span>
     </div>
     {{ env_fields(kp, cards, env_labels) }}
   </details>

@@ -13,11 +13,11 @@ from webapp import create_app
 
 @pytest.fixture
 def stage1(map1):
-    """Map 1 with stage 1 open: goal 6, Ency barred, key point 1 entered."""
+    """Map 1 with stage 1 open and key point 1 entered (Ency barred there)."""
     map1.post("/maps/1/stages/new")
-    map1.post("/maps/stage/1/env", data={"wins_needed": "6", "barred": ["Ency"]})
     map1.post("/maps/stage/1/keypoints/new",
-              data=dict(KEYPOINT_1, min_wins="3", enemy_power="5", no_green="on"))
+              data=dict(KEYPOINT_1, min_wins="3", enemy_power="5", no_green="on",
+                        barred=["Ency"]))
     return map1
 
 
@@ -69,11 +69,18 @@ def test_only_one_open_stage(map1):
     assert "Finish stage 1 before" in r.text
 
 
-def test_stage_env_ignores_unknown_barred_cards(map1, query):
+def test_keypoint_ignores_unknown_barred_cards(map1, query):
     map1.post("/maps/1/stages/new")
-    map1.post("/maps/stage/1/env", data={"wins_needed": "6", "barred": ["Ency", "Nope"]})
-    st = query("SELECT wins_needed, barred FROM stage WHERE id = 1")[0]
-    assert st == {"wins_needed": 6, "barred": '["Ency"]'}
+    map1.post("/maps/stage/1/keypoints/new", data=dict(KEYPOINT_2, barred=["Ency", "Nope"]))
+    assert query("SELECT barred FROM keypoint WHERE id = 1")[0]["barred"] == '["Ency"]'
+
+
+def test_stage_has_no_environment_or_goal(stage1, query):
+    html = stage1.get("/maps/1").text
+    assert "Stage environment" not in html and "Wins needed (stage goal)" not in html
+    assert "Wins 0" in html
+    columns = {r["name"] for r in query("PRAGMA table_info(stage)")}
+    assert not columns & {"wins_needed", "firepower", "barred", "all_keypoints"}
 
 
 def test_keypoint_errors_keep_the_editor_open(map1):
@@ -89,15 +96,16 @@ def test_keypoint_errors_keep_the_editor_open(map1):
 def test_keypoint_is_shown_with_its_conditions(stage1):
     html = stage1.get("/maps/1").text
     assert "Key point 1" in html and "Enemy power +5%" in html and "no green modifiers" in html
-    assert "needs 3 wins here" in html and "more to come" in html
+    assert "needs 3 wins here" in html
     assert 'name="power4" type="number" min="1" value="105"' in html  # editor prefilled
 
 
-def test_solving_an_incomplete_stage_caps_the_goal(stage1, solution):
+def test_solving_maximizes_wins_without_a_stage_goal(stage1, solution):
     r = stage1.post("/maps/stage/1/solve", follow_redirects=True)
     assert "Plan 1" in r.text and "Plan 2" in r.text and "Plan 3" not in r.text
     sol = solution(1)
-    assert sol["goal"] == 4 and len(sol["plans"]) == 2  # 6 needed, only 4 enemies entered
+    assert "goal" not in sol and len(sol["plans"]) == 2
+    assert sol["plans"][0]["exp_wins"] == 4.0          # every enemy beaten
     assert all(s["card"] != "Ency" for s in sol["plans"][0]["keypoints"][0]["slots"])
 
 
@@ -152,12 +160,10 @@ def test_played_keypoint_cannot_be_edited(stage1, solution):
 def test_solving_the_rest_skips_used_cards(stage1, solution):
     stage1.post("/maps/stage/1/solve")
     form = record_plan(stage1, solution, lose_slot=4)
-    stage1.post("/maps/stage/1/keypoints/new", data=KEYPOINT_2)
-    stage1.post("/maps/stage/1/env", data={"wins_needed": "6", "all_keypoints": "on",
-                                           "barred": ["Ency"]})
+    stage1.post("/maps/stage/1/keypoints/new", data=dict(KEYPOINT_2, barred=["Ency"]))
     r = stage1.post("/maps/stage/1/solve", follow_redirects=True)
     sol = solution(1)
-    assert sol["goal"] == 3 and sol["complete"] and len(sol["plans"][0]["keypoints"]) == 1
+    assert len(sol["plans"][0]["keypoints"]) == 1
     used = {int(form[f"card{i}"]) for i in range(1, 5)}
     assert not used & {s.get("map_card_id") for s in sol["plans"][0]["keypoints"][0]["slots"]}
     assert "Use for key point 2" in r.text and "Use for key point 1" not in r.text
@@ -256,17 +262,17 @@ def test_maps_list_and_delete(map1, query):
 
 def test_debuff_power_condition_reaches_the_solver(map1):
     map1.post("/maps/1/stages/new")
-    map1.post("/maps/stage/1/env", data={"wins_needed": "2", "buff_power": "-20"})
-    map1.post("/maps/stage/1/keypoints/new", data=dict(KEYPOINT_2, debuff_power="-50"))
+    map1.post("/maps/stage/1/keypoints/new",
+              data=dict(KEYPOINT_2, debuff_power="-50", buff_power="-20"))
     html = map1.get("/maps/1").text
-    assert "Debuff power -50%" in html  # key point summary
-    assert 'name="buff_power" type="number" value="-20"' in html  # stage form
-    assert 'name="debuff_power" type="number" value="-50"' in html  # key point editor
+    assert "Buff power -20% · Debuff power -50%" in html  # key point summary
+    assert 'name="buff_power" type="number" value="-20"' in html  # key point editor
+    assert 'name="debuff_power" type="number" value="-50"' in html
     with map1.application.app_context():
         from webapp import sandbox  # pylint: disable=import-outside-toplevel
         from webapp.db import get_db  # pylint: disable=import-outside-toplevel
         stage = sandbox.load_stage(get_db(), 1)
-        kp = sandbox.solver_keypoint(stage, stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
+        kp = sandbox.solver_keypoint(stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
     assert kp.cond == {"B": -20, "D": -50}
 
 
@@ -303,17 +309,17 @@ def test_barred_types_reach_the_solver_and_block_recording(map1, query):
     types = {r["name"]: r["type"] for r in query("SELECT name, type FROM map_card")}
     flan = sorted(n for n, t in types.items() if t == "flan")
     map1.post("/maps/1/stages/new")
-    map1.post("/maps/stage/1/env", data={"wins_needed": "2", "barred_types": ["babby", "nope"]})
-    map1.post("/maps/stage/1/keypoints/new", data=dict(KEYPOINT_2, barred_types="flan"))
+    map1.post("/maps/stage/1/keypoints/new",
+              data=dict(KEYPOINT_2, barred_types=["babby", "flan", "nope"]))
     html = map1.get("/maps/1").text
-    assert "barred types: flan" in html
+    assert "barred types: babby, flan" in html
     assert 'name="barred_types" value="babby"\n         checked' in html
     with map1.application.app_context():
         from webapp import sandbox  # pylint: disable=import-outside-toplevel
         from webapp.db import get_db  # pylint: disable=import-outside-toplevel
         stage = sandbox.load_stage(get_db(), 1)
-        assert stage["barred_types"] == ["babby"]
-        kp = sandbox.solver_keypoint(stage, stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
+        assert stage["keypoints"][0]["barred_types"] == ["babby", "flan"]
+        kp = sandbox.solver_keypoint(stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
     assert kp.barred == {n for n, t in types.items() if t in ("babby", "flan")}
     card = query("SELECT id FROM map_card WHERE name = ?", flan[0])[0]["id"]
     r = map1.post("/maps/keypoint/1/record", data={"card1": str(card)}, follow_redirects=True)
@@ -332,10 +338,12 @@ def test_sync_roster_updates_types(map1, query):
 def test_barred_type_locks_its_cards_in_the_list(map1, query):
     flan = sorted(r["name"] for r in query("SELECT name FROM map_card WHERE type = 'flan'"))
     map1.post("/maps/1/stages/new")
-    map1.post("/maps/stage/1/env", data={"barred_types": "flan", "barred": ["KGV"]})
-    assert query("SELECT barred FROM stage WHERE id = 1")[0]["barred"] == '["KGV"]'
+    map1.post("/maps/stage/1/keypoints/new",
+              data=dict(KEYPOINT_2, barred_types="flan", barred=["KGV"]))
+    assert query("SELECT barred FROM keypoint WHERE id = 1")[0]["barred"] == '["KGV"]'
     html = map1.get("/maps/1").text
-    stage_form = html[html.index("Stage environment"):html.index("Save stage settings")]
+    stage_form = html[html.index('id="kp-editor-1"'):]
+    stage_form = stage_form[:stage_form.index("Save key point")]
     for name in flan:
         box = re.search(rf'<input type="checkbox" name="barred" value="{name}"[^>]*>', stage_form)
         tag = box.group(0)
@@ -366,5 +374,5 @@ def test_enemy_boost_is_saved_and_shown(map1, query):
         from webapp import sandbox  # pylint: disable=import-outside-toplevel
         from webapp.db import get_db  # pylint: disable=import-outside-toplevel
         stage = sandbox.load_stage(get_db(), 1)
-        kp = sandbox.solver_keypoint(stage, stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
+        kp = sandbox.solver_keypoint(stage["keypoints"][0], sandbox.map_cards(get_db(), 1))
     assert kp.enemies[1].boost == 16

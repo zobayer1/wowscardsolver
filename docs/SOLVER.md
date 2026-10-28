@@ -11,7 +11,8 @@ The solver lives in [`webapp/engine`](../webapp/engine) and has no web dependenc
 The web app calls `solve_stage()` with the stage you entered.
 
 Given your cards, the key points of a stage and your modifier stock, it suggests which cards
-to place where, and with which modifiers, so that the stage goal is met as reliably as
+to place where, and with which modifiers, so that the key points' requirements are met as
+reliably as possible and as many battles as possible are won
 possible.
 
 ## Inputs and output
@@ -21,11 +22,11 @@ flowchart LR
     subgraph Inputs
         R["Cards<br/>stats, abilities, HP, used, type"]
         K["Key points<br/>4 enemy slots each:<br/>power, boost, vulnerabilities, must-win"]
-        E["Environment<br/>stage goal, wins needed per key point,<br/>% conditions, barred cards / types,<br/>blocked modifier slots"]
+        E["Per key point<br/>wins needed, % conditions,<br/>barred cards / types,<br/>blocked modifier slots"]
         M["Modifier stock<br/>count of each modifier"]
     end
     R & K & E & M --> S(["solve_stage()"])
-    S --> P["Best plan + an alternative assigning<br/>at least 3 cards differently (web app)<br/>card + modifiers per slot,<br/>win chance per battle,<br/>goal chance, expected wins, HP cost"]
+    S --> P["Best plan + an alternative assigning<br/>at least 3 cards differently (web app)<br/>card + modifiers per slot,<br/>win chance per battle,<br/>requirements chance, expected wins, HP cost"]
 ```
 
 ## The search
@@ -44,7 +45,7 @@ flowchart TD
         T2 --> X["Combine one option from every pool,<br/>never using a card twice"]
         X --> BB{"Could this partial split still<br/>beat the weakest one held?"}
         BB -- "no: skip it and everything under it" --> X
-        BB -- yes --> Y["Score the whole stage:<br/>chance of meeting the stage goal<br/>and every per-key-point minimum"]
+        BB -- yes --> Y["Score the whole stage:<br/>chance of beating every must-win enemy<br/>and meeting every key point minimum"]
         Y --> Z["Keep the best card splits<br/>(5,000 in the web app, 40 by default)"]
     end
 
@@ -62,10 +63,11 @@ flowchart TD
 
 Plans are compared on these, in order. A later item only breaks ties in the earlier ones.
 
-1. **Chance of meeting the stage goal**, including every per-key-point minimum and every
-   must-win enemy.
+1. **Chance of meeting the requirements**: beating every must-win enemy and winning at
+   least each key point's required wins. There is no stage-wide goal; set required wins
+   on the key points instead.
 2. **Expected number of wins.**
-3. **Fewest modifier points spent**, so a modifier is only used when it raises the goal
+3. **Fewest modifier points spent**, so a modifier is only used when it raises the requirements
    chance or the expected wins.
 4. **Lowest HP cost**: the card power lost to the 1 HP each placed card spends.
 
@@ -136,7 +138,7 @@ possible card splits. These keep the solve to seconds, without changing which pl
    the key points still to choose, the highest chance of each win count, the most expected
    wins, and the lowest modifier spend and HP cost that any of their options offers. That is
    an upper bound, so nothing that would have made the top 40 is dropped.
-3. **Ties are bounded tightly.** Many plans tie on goal chance and wins (for example when
+3. **Ties are bounded tightly.** Many plans tie on requirements chance and wins (for example when
    every battle is a certain win) and differ only in HP cost. A split can only tie on wins by
    taking a most-wins option at every remaining key point, so for ties the cost bound uses
    the cheapest *most-wins* option, not the cheapest option overall (which would be the
@@ -145,13 +147,13 @@ possible card splits. These keep the solve to seconds, without changing which pl
    options the search checks the best that any of the remaining ones could still achieve,
    and stops scanning that list once none of them could beat the weakest split held.
 5. **Only useful modifiers.** A modifier costs points, and spend ranks before HP cost, so
-   it can only improve a plan by raising the goal chance or the expected wins, which means
+   it can only improve a plan by raising the requirements chance or the expected wins, which means
    raising the chance of some battle that is not yet certain. Each modifier can only reach
    certain battles: Gunnery, Damage Control, Dodge and Focused its own card's (Fast Repair
    too, if the card is damaged); Teamwork the neighbours its card buffs; Specialization the
    enemies its card's debuffs hit, Rabid those they miss; Unstoppable whatever the key
    point's conditions weaken (so it, and Teamwork against a "Buff power −100%" condition,
-   are tried exactly where they matter); Morale the goal, while it is not certain. A
+   are tried exactly where they matter); Morale the required wins, while it is not certain. A
    modifier whose reachable battles are all certain wins is not tried. This applies when a
    search only needs its single best plan, as in the web app; a modifier whose value is set
    to 0 turns it off.

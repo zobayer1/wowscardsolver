@@ -152,13 +152,10 @@ def load_stage(db, stage_id):
     if row is None:
         return None
     st = dict(row)
-    st["barred"] = json.loads(st["barred"])
-    st["barred_types"] = json.loads(st["barred_types"])
     st["solution"] = json.loads(st["solution"]) if st["solution"] else None
     st["keypoints"] = load_keypoints(db, stage_id)
     st["wins"] = sum(kp["wins"] for kp in st["keypoints"])
     st["has_battles"] = any(kp["played"] for kp in st["keypoints"])
-    st["complete"] = bool(st["all_keypoints"]) or len(st["keypoints"]) >= MAX_KEYPOINTS
     return st
 
 
@@ -185,17 +182,6 @@ def create_stage(db, map_id):
 def _check_open(stage):
     if stage["finished"]:
         raise SandboxError(f"Stage {stage['number']} is finished.")
-
-
-def update_stage_env(db, stage, env):
-    """Save the stage's environment settings (wins_needed, conditions, bans, all_keypoints)."""
-    _check_open(stage)
-    env = dict(env, barred=json.dumps(env["barred"]),
-               barred_types=json.dumps(env["barred_types"]))
-    with db:
-        db.execute(f"UPDATE stage SET {', '.join(f'{k} = ?' for k in env)} WHERE id = ?",
-                   [*env.values(), stage["id"]])
-        _mark_stale(db, stage_id=stage["id"])
 
 
 def save_keypoint(db, stage, env, enemies, keypoint_id=None):
@@ -385,9 +371,8 @@ def _validate_battle(db, stage, kp, entries):
         errors.append("Place at least one card.")
     cards = {c["id"]: c for c in map_cards(db, stage["map_id"])}
     rules = {"enemies": kp["enemies"],
-             "barred": barred_names(stage, kp, cards.values()),
-             "grey": stage["no_grey"] or kp["no_grey"],
-             "green": stage["no_green"] or kp["no_green"]}
+             "barred": barred_names(kp, cards.values()),
+             "grey": kp["no_grey"], "green": kp["no_green"]}
     seen = set()
     for e in entries:
         errors += _entry_errors(e, cards.get(e["map_card_id"]), rules, seen)
@@ -432,45 +417,22 @@ def to_solver_card(row, used=False):
                        type=row["type"])
 
 
-def barred_names(stage, kp, cards):
-    """Names of the map cards barred at a key point: barred by name on the stage or the key
-    point, or of a type barred there."""
-    types = set(stage["barred_types"]) | set(kp["barred_types"])
-    return (frozenset(stage["barred"]) | frozenset(kp["barred"])
-            | {c["name"] for c in cards if c["type"] in types})
+def barred_names(kp, cards):
+    """Names of the map cards barred at a key point: by name, or of a type barred there."""
+    types = set(kp["barred_types"])
+    return frozenset(kp["barred"]) | {c["name"] for c in cards if c["type"] in types}
 
 
-def _cond(*envs):
-    out = {}
-    for env in envs:
-        for field, key in COND_KEYS.items():
-            if env[field]:
-                out[key] = out.get(key, 0) + env[field]
-    return out
-
-
-def _no_mods(*envs):
-    return frozenset(kind for kind in ("grey", "green")
-                     for env in envs if env[f"no_{kind}"])
-
-
-def solver_keypoint(stage, kp, cards):
-    """solver.KeyPoint for a key point of a stage, given the map's card rows."""
+def solver_keypoint(kp, cards):
+    """solver.KeyPoint for a key point, given the map's card rows."""
     enemies = [None if e is None else
                solver.Enemy(e["power"], tuple(v for v in (e["vuln1"], e["vuln2"]) if v),
                             bool(e["must_win"]), e["boost"])
                for e in kp["enemies"]]
-    return solver.KeyPoint(str(kp["number"]), enemies, _cond(stage, kp), kp["min_wins"],
-                           barred_names(stage, kp, cards), _no_mods(stage, kp))
-
-
-def stage_goal(stage, open_kps):
-    """Wins still needed from the open key points. While key points are still being added,
-    it is capped at what the entered ones can provide."""
-    goal = max(0, stage["wins_needed"] - stage["wins"])
-    if not stage["complete"]:
-        goal = min(goal, sum(1 for kp in open_kps for e in kp["enemies"] if e))
-    return goal
+    cond = {key: kp[field] for field, key in COND_KEYS.items() if kp[field]}
+    no_mods = frozenset(kind for kind in ("grey", "green") if kp[f"no_{kind}"])
+    return solver.KeyPoint(str(kp["number"]), enemies, cond, kp["min_wins"],
+                           barred_names(kp, cards), no_mods)
 
 
 def solve(db, stage):
@@ -481,13 +443,14 @@ def solve(db, stage):
         raise SandboxError("There are no unplayed key points to solve.")
     cards = map_cards(db, stage["map_id"])
     roster = [to_solver_card(c, used=bool(c["used"])) for c in cards]
-    goal = stage_goal(stage, open_kps)
+    # No stage goal: the ranking already maximizes wins, after must-win enemies and each key
+    # point's own minimum.
     search = {}
     best, n_plans, n_total = solver.solve_stage(
-        roster, [solver_keypoint(stage, kp, cards) for kp in open_kps], goal,
+        roster, [solver_keypoint(kp, cards) for kp in open_kps], 0,
         modifier_counts(db), SOLVE_LIMITS, report=search)
     ids = {c["name"]: c["id"] for c in cards}
-    solution = {"goal": goal, "complete": stage["complete"], "compared": n_plans,
+    solution = {"compared": n_plans,
                 "variants": n_total, "options": search["options"], "exact": search["exact"],
                 "modified": search["modified"], "candidates": search["candidates"],
                 "solved_at": datetime.now().strftime("%Y-%m-%d %H:%M"),

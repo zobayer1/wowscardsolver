@@ -5,7 +5,7 @@
 | `roster.csv` | Your cards | **Import CSV** / **Export CSV** on the Roster page |
 | `modifiers.csv` | A modifier stock | the example stage in `tests/data` |
 | `board.csv` | Enemy cards at each key point of a stage | the example stage in `tests/data` |
-| `environment.csv` | Stage goal, battle conditions and restrictions | the example stage in `tests/data` |
+| `environment.csv` | Required wins, battle conditions and restrictions | the example stage in `tests/data` |
 
 In the web app you enter stages, key points and modifier counts on the map page; only the
 roster is exchanged as a CSV file. The other three files describe a complete stage for the
@@ -73,7 +73,7 @@ One row per modifier type. The solver only recommends a modifier whose `count` i
 | `value` | no | number | Points-equivalent charged each time one is used. Raise it to make the solver more reluctant to spend that modifier. |
 | `effect` | no | text | Description for your reference. Ignored by the solver. |
 
-A modifier is only used when it raises the chance of meeting the stage goal or the expected number of wins. Between otherwise equal plans, the one spending fewer modifier points (by `value`) wins.
+A modifier is only used when it raises the chance of meeting the requirements (must-win enemies, required wins) or the expected number of wins. Between otherwise equal plans, the one spending fewer modifier points (by `value`) wins.
 
 | Name | Type | Default value | Effect |
 |---|---|---|---|
@@ -82,7 +82,7 @@ A modifier is only used when it raises the chance of meeting the stage goal or t
 | `Dodge` | grey | 12 | Maneuverability +20% |
 | `Teamwork` | grey | 12 | This card's buffs are doubled |
 | `Effectiveness` | grey | 18 | Reward from this battle +10%. The solver does not rank by reward, so it never recommends this one. |
-| `Morale` | grey | 12 | A win counts as 2 toward the stage goal |
+| `Morale` | grey | 12 | A win counts as 2 toward required wins |
 | `Focused` | green | 15 | All parameters +40%; this card gives and receives no buffs, and its debuffs are off |
 | `Specialization` | green | 15 | This card's debuffs are doubled |
 | `Rabid` | green | 15 | This card's debuffs work without a matching vulnerability |
@@ -135,7 +135,7 @@ One row per setting. Columns: `setting`, `keypoint`, `value`.
 
 | Setting | `keypoint` | `value` | Meaning |
 |---|---|---|---|
-| `Wins needed` | blank | whole number | Stage goal: enemies to defeat across all key points. |
+| `Wins needed` | blank | whole number | Stage goal across all key points. The web app has no stage goal (it maximizes wins), so the compatibility test ignores this row. |
 | `Wins needed` | key point | whole number | Minimum wins that must also come from this key point (e.g. to clear a condition it generates). |
 | `Firepower` | blank or key point | whole number | Battle condition on your cards, in percent. Negative for a penalty (`-12`), positive for a bonus. |
 | `Survivability` | blank or key point | whole number | Same, for survivability. |
@@ -174,7 +174,7 @@ No modifiers,2,yes
 - **Win chance:** the share of the 21 possible rolls that are at least the enemy's power. Ties are wins.
 
 Plans are ranked by:
-1. Chance of meeting the stage goal, including any per-key-point minimums and must-win enemies.
+1. Chance of beating every must-win enemy and meeting each key point's required wins.
 2. Expected number of wins.
 3. Fewest modifier points spent.
 4. Lowest card cost, i.e. the least power lost to HP damage.

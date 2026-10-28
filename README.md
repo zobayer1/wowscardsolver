@@ -2,8 +2,8 @@ WOWS Card Game Solver
 =====================
 
 An interactive solver for a 4-vs-4 card game: it plans which of your cards to send to each key
-point of a map stage, and with which modifiers, so that you meet the stage goal as reliably as
-possible. See the [game rules](./docs/GAME_RULES.md) and
+point of a map stage, and with which modifiers, to win as many battles as possible while
+beating every must-win enemy and each key point's required wins. See the [game rules](./docs/GAME_RULES.md) and
 [how the solver works](./docs/SOLVER.md).
 
 It is a small Flask web app that tracks a whole map for you: HP, used cards and the
@@ -15,9 +15,9 @@ modifier stock.
   `roster.csv`.
 - **Maps:** each map works on its own copy of the roster, so HP and used cards are tracked per
   map. New roster cards can be synced in at any time.
-- **Stages and key points:** enter up to 5 key points per stage, one at a time, with the
-  stage goal and battle conditions: % conditions, barred cards or card types, blocked
-  modifier slots.
+- **Stages and key points:** enter up to 5 key points per stage, one at a time, each with
+  its own required wins and battle conditions: % conditions, barred cards or card types,
+  blocked modifier slots.
 - **Solver:** suggests the best plan and a real alternative (one that assigns at least 3 cards
   differently); **Apply plan** records the battles, takes 1 HP from
   each card, marks the cards used and spends the modifiers.
@@ -71,8 +71,8 @@ flask --app webapp import-roster path/to/roster.csv
 1. **Roster:** import or enter your cards and set the modifier counts in the panel on the
    right.
 2. **New map** (top right) opens the map in a new tab with every card at 3 HP.
-3. **Start a New Stage**, set the stage goal and conditions, and add the key points as they
-   appear. Tick **All key points of this stage are entered** once you have them all.
+3. **Start a New Stage** and add the key points as they appear, each with its enemies,
+   conditions and the wins it needs (if any).
 4. **Solve**, then **Apply plan** on the plan you play. Correct any battle that went
    differently by clicking its Won / Lost.
 5. **Finish stage**: used marks clear and HP carries over into the next stage.

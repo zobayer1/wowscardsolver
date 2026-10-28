@@ -54,24 +54,12 @@ CREATE TABLE IF NOT EXISTS modifier (
     version  INTEGER NOT NULL DEFAULT 1
 );
 
--- Stages and key points share the environment columns (firepower .. no_green).
--- Conditions are percentages; barred is a JSON list of card names.
+-- A key point's environment: conditions in percent (firepower .. debuff_power), barred card
+-- names and types (JSON lists), and blocked modifier slots.
 CREATE TABLE IF NOT EXISTS stage (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     map_id           INTEGER NOT NULL REFERENCES map(id) ON DELETE CASCADE,
     number           INTEGER NOT NULL,
-    wins_needed      INTEGER NOT NULL DEFAULT 0,
-    firepower        INTEGER NOT NULL DEFAULT 0,
-    survivability    INTEGER NOT NULL DEFAULT 0,
-    maneuverability  INTEGER NOT NULL DEFAULT 0,
-    enemy_power      INTEGER NOT NULL DEFAULT 0,
-    buff_power       INTEGER NOT NULL DEFAULT 0,
-    debuff_power     INTEGER NOT NULL DEFAULT 0,
-    barred           TEXT    NOT NULL DEFAULT '[]',
-    barred_types     TEXT    NOT NULL DEFAULT '[]',
-    no_grey          INTEGER NOT NULL DEFAULT 0,
-    no_green         INTEGER NOT NULL DEFAULT 0,
-    all_keypoints    INTEGER NOT NULL DEFAULT 0,   -- every key point of the stage is entered
     finished         INTEGER NOT NULL DEFAULT 0,
     solution         TEXT,                         -- JSON of the last solver run
     solution_stale   INTEGER NOT NULL DEFAULT 0,   -- inputs changed since that run

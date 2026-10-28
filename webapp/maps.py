@@ -163,9 +163,7 @@ def _render_map(map_id, draft=None):
         modifiers=sandbox.modifier_counts(db),
         grey_mods=sandbox.GREY_MODS, green_mods=sandbox.GREEN_MODS, vuln_names=solver.VULNS,
         env_labels=ENV_LABELS, describe=describe_ability,
-        max_keypoints=sandbox.MAX_KEYPOINTS,
-        goal=sandbox.stage_goal(current, [k for k in current["keypoints"] if not k["played"]])
-        if current else 0)
+        max_keypoints=sandbox.MAX_KEYPOINTS)
 
 
 @bp.route("/<int:map_id>/cards", methods=("POST",))
@@ -249,20 +247,6 @@ def _stage_action(stage_id, action, message):
     except sandbox.SandboxError as e:
         flash(str(e), "error")
     return _to_map(stage, f"stage-{stage['number']}")
-
-
-@bp.route("/stage/<int:stage_id>/env", methods=("POST",))
-def stage_env(stage_id):
-    """Save the stage's environment."""
-    stage = _get_stage(stage_id)
-    env, errors = parse_env(request.form, sandbox.map_cards(get_db(), stage["map_id"]))
-    env["wins_needed"] = _int(request.form, "wins_needed", errors, "Wins needed", minimum=0)
-    env["all_keypoints"] = int("all_keypoints" in request.form)
-    if errors:
-        _flash_errors(errors)
-        return _to_map(stage, "current-stage")
-    return _stage_action(stage_id, lambda db, s: sandbox.update_stage_env(db, s, env),
-                         "Stage {n} settings saved.")
 
 
 @bp.route("/stage/<int:stage_id>/solve", methods=("POST",))

@@ -17,10 +17,8 @@ BARRED = ["Avenger", "Clip", "Ency", "Hellcat", "Jhonny", "KGV", "Kiddo", "Narly
 def solved(map1):
     """Map 1, stage 1 complete with key points 1 and 2 and solved."""
     map1.post("/maps/1/stages/new")
-    map1.post("/maps/stage/1/env",
-              data={"wins_needed": "4", "all_keypoints": "on", "barred": BARRED})
-    map1.post("/maps/stage/1/keypoints/new", data=KEYPOINT_1)
-    map1.post("/maps/stage/1/keypoints/new", data=KEYPOINT_2)
+    map1.post("/maps/stage/1/keypoints/new", data=dict(KEYPOINT_1, barred=BARRED))
+    map1.post("/maps/stage/1/keypoints/new", data=dict(KEYPOINT_2, barred=BARRED))
     map1.post("/maps/stage/1/solve")
     return map1
 

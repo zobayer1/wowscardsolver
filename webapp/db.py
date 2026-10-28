@@ -27,17 +27,21 @@ def close_db(_exc=None):
 
 # Columns added after a table was first created: (table, column, declaration).
 MIGRATIONS = [("map_card", "used", "INTEGER NOT NULL DEFAULT 0"),
-              *((table, column, "INTEGER NOT NULL DEFAULT 0")
-                for table in ("stage", "keypoint") for column in ("buff_power", "debuff_power")),
+              *(("keypoint", column, "INTEGER NOT NULL DEFAULT 0")
+                for column in ("buff_power", "debuff_power")),
               ("card", "type", "TEXT NOT NULL DEFAULT ''"),
               ("map_card", "type", "TEXT NOT NULL DEFAULT ''"),
-              ("stage", "barred_types", "TEXT NOT NULL DEFAULT '[]'"),
               ("keypoint", "barred_types", "TEXT NOT NULL DEFAULT '[]'"),
               ("enemy", "boost", "INTEGER NOT NULL DEFAULT 0")]
 
 
-# Columns no longer used: (table, column). Dropped when present.
-DROPPED = [("enemy", "reward")]
+# Columns no longer used: (table, column). Dropped when present. Stages used to have a wins
+# goal and their own environment; everything is now set per key point.
+DROPPED = [("enemy", "reward"),
+           *(("stage", column) for column in (
+               "wins_needed", "firepower", "survivability", "maneuverability", "enemy_power",
+               "buff_power", "debuff_power", "barred", "barred_types", "no_grey", "no_green",
+               "all_keypoints"))]
 
 
 def init_db():

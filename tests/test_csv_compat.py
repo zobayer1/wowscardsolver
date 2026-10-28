@@ -49,7 +49,7 @@ def enemy_form(enemies):
 @pytest.fixture
 def ui_stage(client, csv_stage, query):
     """The same game entered through the web routes, as a user would."""
-    roster, keypoints, min_wins, inventory = csv_stage
+    roster, keypoints, _, inventory = csv_stage
     upload(client, (DATA / "roster.csv").read_bytes())
     client.post("/maps/new", data={"name": "From CSV"})
     set_stock(client, {n: inventory.get(n, 0) for n in solver.MODIFIERS})
@@ -59,18 +59,10 @@ def ui_stage(client, csv_stage, query):
     cards.update({f"used_{ids[c.name]}": "on" for c in roster if c.used})
     client.post("/maps/1/cards", data=cards)  # after starting the stage, which clears used
 
-    # Stage-wide settings are what every key point shares; the rest goes on each key point.
-    shared_cond = {k: v for k, v in keypoints[0].cond.items()
-                   if all(kp.cond.get(k) == v for kp in keypoints)}
-    shared_barred = frozenset.intersection(*(kp.barred for kp in keypoints))
-    shared_nomods = frozenset.intersection(*(kp.no_mods for kp in keypoints))
-    client.post("/maps/stage/1/env", data={"wins_needed": str(min_wins), "all_keypoints": "on",
-                                           **env_form(shared_cond, shared_barred, shared_nomods)})
+    # Stages have no settings of their own: everything (including what environment.csv sets
+    # for the whole stage) goes on each key point.
     for kp in keypoints:
-        own_cond = {k: v - shared_cond.get(k, 0) for k, v in kp.cond.items()
-                    if v != shared_cond.get(k, 0)}
-        form = {**enemy_form(kp.enemies),
-                **env_form(own_cond, kp.barred - shared_barred, kp.no_mods - shared_nomods)}
+        form = {**enemy_form(kp.enemies), **env_form(kp.cond, kp.barred, kp.no_mods)}
         if kp.min_wins:
             form["min_wins"] = str(kp.min_wins)
         r = client.post("/maps/stage/1/keypoints/new", data=form)
@@ -79,18 +71,16 @@ def ui_stage(client, csv_stage, query):
 
 
 def test_ui_gives_the_solver_the_same_inputs(ui_stage, csv_stage):
-    roster, keypoints, min_wins, inventory = csv_stage
+    roster, keypoints, _, inventory = csv_stage
     with ui_stage.application.app_context():
         db = get_db()
         stage = sandbox.load_stage(db, 1)
         ui_roster = [sandbox.to_solver_card(c, used=bool(c["used"]))
                      for c in sandbox.map_cards(db, 1)]
         cards = sandbox.map_cards(db, 1)
-        ui_keypoints = [sandbox.solver_keypoint(stage, kp, cards) for kp in stage["keypoints"]]
+        ui_keypoints = [sandbox.solver_keypoint(kp, cards) for kp in stage["keypoints"]]
         ui_inventory = sandbox.modifier_counts(db)
-        goal = sandbox.stage_goal(stage, stage["keypoints"])
     assert sorted(ui_roster, key=lambda c: c.name) == sorted(roster, key=lambda c: c.name)
-    assert goal == min_wins
     assert ui_inventory == {n: inventory.get(n, 0) for n in solver.MODIFIERS}
     assert len(ui_keypoints) == len(keypoints)
     for ui, kp in zip(ui_keypoints, keypoints):
@@ -102,11 +92,12 @@ def test_ui_gives_the_solver_the_same_inputs(ui_stage, csv_stage):
 
 
 def test_ui_and_csv_give_the_same_best_plans(ui_stage, csv_stage, solution):
-    roster, keypoints, min_wins, inventory = csv_stage
+    roster, keypoints, _, inventory = csv_stage
+    # The web app has no stage goal (it maximizes wins), so the CSV's stage goal is not used.
     # The map lists cards by name, so solve the CSV roster in that order too: equally ranked
     # plans are then broken the same way and the placements match exactly.
     by_name = sorted(roster, key=lambda c: c.name.lower())
-    best, _, _ = solver.solve_stage(by_name, keypoints, min_wins, inventory,
+    best, _, _ = solver.solve_stage(by_name, keypoints, 0, inventory,
                                     sandbox.SOLVE_LIMITS)   # the web app's limits (fixed trim)
     ui_stage.post("/maps/stage/1/solve")
     plans = solution(1)["plans"]

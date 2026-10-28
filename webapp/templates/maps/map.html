@@ -17,10 +17,8 @@
       <div class="panel-head">
         <h2 id="stage-{{ st.number }}">Stage {{ st.number }}</h2>
         <div class="chips">
-          <span class="chip {{ 'ok' if st.wins >= st.wins_needed and st.wins_needed }}">
-            Wins {{ st.wins }} / {{ st.wins_needed }}</span>
-          <span class="chip">{{ st.keypoints|length }} key point{{ 's' if st.keypoints|length != 1 }}
-            · {{ 'all entered' if st.complete else 'more to come' }}</span>
+          <span class="chip">Wins {{ st.wins }}</span>
+          <span class="chip">{{ st.keypoints|length }} key point{{ 's' if st.keypoints|length != 1 }}</span>
         </div>
         <div class="panel-actions">
           {% if not st.has_battles %}
@@ -30,35 +28,17 @@
           </form>
           {% endif %}
           <form method="post" action="{{ url_for('maps.finish_stage', stage_id=st.id) }}"
-                data-confirm="Finish stage {{ st.number }}?{% if st.wins < st.wins_needed %} The goal of {{ st.wins_needed }} wins is not met yet.{% endif %}"
+                data-confirm="Finish stage {{ st.number }}?"
                 onsubmit="return confirm(this.dataset.confirm);">
             <button class="button small" type="submit">Finish stage</button>
           </form>
         </div>
       </div>
 
-      {# stage environment #}
-      <form method="post" action="{{ url_for('maps.stage_env', stage_id=st.id) }}" class="subpanel">
-        <h3>Stage environment</h3>
-        <div class="fields">
-          <label class="narrow">Wins needed (stage goal)
-            <input name="wins_needed" type="number" min="0" value="{{ st.wins_needed }}">
-          </label>
-          <label class="check end">
-            <input type="checkbox" name="all_keypoints" {{ 'checked' if st.all_keypoints }}>
-            All key points of this stage are entered
-          </label>
-        </div>
-        {{ env_fields(st, cards, env_labels) }}
-        <div class="form-actions">
-          <button class="button" type="submit">Save stage settings</button>
-        </div>
-      </form>
-
       {# key points #}
       {% for kp in st.keypoints %}
-      {% set barred = st.barred + kp.barred %}
-      {% set barred_types = st.barred_types + kp.barred_types %}
+      {% set barred = kp.barred %}
+      {% set barred_types = kp.barred_types %}
       {% set editing = draft and draft.kp_id == kp.id %}
       <div class="kp {{ 'played' if kp.played }}" id="kp-{{ kp.id }}">
         <div class="kp-head">
@@ -113,11 +93,11 @@
                   {% endfor %}
                 </select>
                 <div class="mods-row">
-                  <select name="grey{{ slot }}" aria-label="Grey modifier" {{ 'disabled' if st.no_grey or kp.no_grey }}>
+                  <select name="grey{{ slot }}" aria-label="Grey modifier" {{ 'disabled' if kp.no_grey }}>
                     <option value="">No grey</option>
                     {% for n in grey_mods if modifiers[n] > 0 %}<option>{{ n }}</option>{% endfor %}
                   </select>
-                  <select name="green{{ slot }}" aria-label="Green modifier" {{ 'disabled' if st.no_green or kp.no_green }}>
+                  <select name="green{{ slot }}" aria-label="Green modifier" {{ 'disabled' if kp.no_green }}>
                     <option value="">No green</option>
                     {% for n in green_mods if modifiers[n] > 0 %}<option>{{ n }}</option>{% endfor %}
                   </select>
@@ -171,8 +151,6 @@
             <button class="button primary" type="submit">
               Solve {{ open_kps|length }} open key point{{ 's' if open_kps|length != 1 }}</button>
           </form>
-          <span class="hint">Goal for this run: {{ goal }} more win{{ 's' if goal != 1 }}{% if not st.complete %}
-            (capped at what the entered key points offer, since more key points are coming){% endif %}.</span>
         </div>
 
         {% set sol = st.solution %}
@@ -182,7 +160,6 @@
           {% if sol.exact %}· searched every option
           {% elif sol.options %}· <span title="Each key point's options were trimmed to its best {{ sol.options }} before combining, to stay within the time limit. A better plan is possible but unlikely.">best {{ '{:,}'.format(sol.options) }} options per key point (time limit)</span>{% endif %}
           {% if sol.candidates and sol.modified < sol.candidates %}· <span title="Modifiers were tried on the best {{ sol.modified }} card splits before the time limit.">modifiers tried on the best {{ '{:,}'.format(sol.modified) }} of {{ '{:,}'.format(sol.candidates) }} splits</span>{% endif %}
-          · goal {{ sol.goal }} wins
           {% if st.solution_stale %}<span class="warn">Inputs changed since this run. Solve again for current advice.</span>{% endif %}
         </p>
         <div class="plans">
@@ -203,7 +180,7 @@
               {% endif %}
             </div>
             <div class="plan-stats">
-              <span><b>{{ pct(plan.p_goal) }}</b> goal</span>
+              <span title="Chance of beating every must-win enemy and meeting each key point's minimum wins"><b>{{ pct(plan.p_goal) }}</b> requirements met</span>
               <span><b>{{ '%.2f' % plan.exp_wins }}</b> exp. wins</span>
               <span><b>{{ '%g' % plan.spend }}</b> modifier spend</span>
               <span><b>{{ '%.1f' % plan.cost }}</b> HP cost</span>
@@ -286,9 +263,8 @@
     <details class="panel past" id="stage-{{ st.number }}">
       <summary>
         <h2>Stage {{ st.number }}</h2>
-        <span class="chip {{ 'ok' if st.wins >= st.wins_needed }}">Wins {{ st.wins }} / {{ st.wins_needed }}</span>
+        <span class="chip">Wins {{ st.wins }}</span>
         <span class="chip">{{ st.keypoints|length }} key point{{ 's' if st.keypoints|length != 1 }}</span>
-        <span class="muted">{{ env_summary(st, env_labels) }}</span>
         {% if loop.first and not current %}
         <form method="post" action="{{ url_for('maps.reopen_stage', stage_id=st.id) }}" class="push-right">
           <button class="button small" type="submit">Reopen</button>
